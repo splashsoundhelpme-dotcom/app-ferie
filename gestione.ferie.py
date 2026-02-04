@@ -31,8 +31,13 @@ def carica_dati():
 def calcola_giorni_lavorativi(start, end):
     return np.busday_count(start, end + timedelta(days=1))
 
+def calcola_ferie_maturate_2026(saldo_arretrato):
+    oggi = date.today()
+    mesi = oggi.month if oggi.year == 2026 else (12 if oggi.year > 2026 else 0)
+    return round(float(saldo_arretrato) + (mesi * 2.33), 2)
+
 def verifica_disponibilita(inizio, fine, df_esistente, tipo_richiesta):
-    # SALTA FILA: 104, Congedo, Donazione Sangue
+    # SALTA FILA: 104, Congedo Parentale, Donazione Sangue
     if tipo_richiesta in ["104", "Congedo Parentale", "Donazione Sangue"]:
         return True, None
     
@@ -48,7 +53,7 @@ df_dipendenti, df_ferie = carica_dati()
 # --- LOGIN ---
 if "user" not in st.session_state:
     st.title("🔐 Portale Aziendale")
-    nome_input = st.text_input("Nome Utente (usa TAB per scendere)")
+    nome_input = st.text_input("Nome Utente (Premi TAB per scendere)")
     pwd_input = st.text_input("Password", type="password")
     
     if st.button("Entra"):
@@ -63,9 +68,9 @@ if "user" not in st.session_state:
                 st.session_state["user"] = utente.iloc[0]['Nome']
                 st.rerun()
             else:
-                st.error("Credenziali errate.")
+                st.error("Accesso negato.")
         else:
-            st.error("Database vuoto. Accedi come admin per aggiungere personale.")
+            st.error("Nessun utente trovato. Accedi come admin.")
     st.stop()
 
 # --- LOGOUT ---
@@ -76,49 +81,97 @@ if st.sidebar.button("Esci / Logout"):
 # --- AREA DIPENDENTE ---
 if st.session_state["user"] != "admin":
     nome_u = st.session_state["user"]
-    st.title(f"👋 Pannello di {nome_u}")
+    st.title(f"👋 Ciao {nome_u}")
     
-    with st.form("form_richiesta"):
-        st.subheader("Inserisci la tua richiesta")
-        tipo = st.selectbox("Motivazione", ["Ferie", "104", "Congedo Parentale", "Donazione Sangue", "Altro"])
+    dati_u = df_dipendenti[df_dipendenti['Nome'] == nome_u].iloc[0]
+    
+    # Cambio Password obbligatorio al primo accesso
+    if dati_u['Primo_Accesso']:
+        st.warning("⚠️ Cambia la password per procedere")
+        new_p = st.text_input("Nuova Password", type="password")
+        if st.button("Salva"):
+            idx = df_dipendenti.index[df_dipendenti['Nome'] == nome_u].tolist()[0]
+            df_dipendenti.at[idx, 'Password'] = new_p
+            df_dipendenti.at[idx, 'Primo_Accesso'] = False
+            df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+            st.success("Fatto! Ricarico...")
+            time.sleep(1)
+            st.rerun()
+        st.stop()
+
+    # Calcolo Saldo
+    maturato = calcola_ferie_maturate_2026(dati_u['Saldo_Arretrato'])
+    usate = df_ferie[(df_ferie['Nome'] == nome_u) & (df_ferie['Tipo'] == 'Ferie')]['Giorni'].sum()
+    st.metric("Saldo Ferie Residuo", f"{round(maturato - usate, 2)} gg")
+
+    with st.form("richiesta"):
+        tipo = st.selectbox("Motivo", ["Ferie", "104", "Congedo Parentale", "Donazione Sangue", "Altro"])
         c1, c2 = st.columns(2)
-        inizio = c1.date_input("Dal", format="DD/MM/YYYY")
-        fine = c2.date_input("Al", format="DD/MM/YYYY")
+        inizio = c1.date_input("Inizio", format="DD/MM/YYYY")
+        fine = c2.date_input("Fine", format="DD/MM/YYYY")
         
-        if st.form_submit_button("Invia"):
-            ok, giorno_pieno = verifica_disponibilita(inizio, fine, df_ferie, tipo)
+        if st.form_submit_button("INVIA RICHIESTA"):
+            ok, giorno_full = verifica_disponibilita(inizio, fine, df_ferie, tipo)
             if ok:
                 g = calcola_giorni_lavorativi(inizio, fine)
                 nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[tipo],'Giorni':[g]})
                 df_ferie = pd.concat([df_ferie, nuova], ignore_index=True)
                 df_ferie.to_csv(FILE_FERIE, index=False)
                 
-                st.success(f"✅ Richiesta salvata! Notifica inviata a {EMAIL_NOTIFICA}")
+                st.success(f"✅ Inviata! Notifica spedita a {EMAIL_NOTIFICA}")
                 time.sleep(2)
-                st.rerun() # Torna alla home dell'app
+                st.rerun()
             else:
-                st.error(f"⛔ Limite raggiunto il {giorno_pieno.strftime('%d/%m/%Y')}. Scegli altre date.")
+                st.error(f"⛔ Errore: Il {giorno_full.strftime('%d/%m/%Y')} ci sono già 3 assenti.")
 
 # --- AREA ADMIN ---
 else:
     st.title("👨‍💼 Admin Dashboard")
-    scelta = st.sidebar.radio("Menu", ["Planning", "Gestione Utenti"])
+    menu = st.sidebar.radio("Scegli", ["Planning", "Gestione Utenti", "Storico"])
 
-    if scelta == "Planning":
-        st.write("### Situazione Settimanale")
-        # Visualizza tabella ferie se non vuota
-        if not df_ferie.empty:
-            st.dataframe(df_ferie)
-        else:
-            st.info("Nessuna prenotazione presente.")
+    if menu == "Planning":
+        st.subheader("🗓️ Situazione Settimanale")
+        d_rif = st.date_input("Settimana dal", date.today(), format="DD/MM/YYYY")
+        giorni = [d_rif + timedelta(days=i) for i in range(7)]
+        
+        plan = []
+        for _, r in df_dipendenti.iterrows():
+            f = {"Dipendente": r['Nome']}
+            for g in giorni:
+                ass = df_ferie[(df_ferie['Nome'] == r['Nome']) & (df_ferie['Inizio'] <= g) & (df_ferie['Fine'] >= g)]
+                f[g.strftime("%d/%m")] = f"❌ {ass.iloc[0]['Tipo']}" if not ass.empty else "✅"
+            plan.append(f)
+        st.dataframe(pd.DataFrame(plan), use_container_width=True)
 
-    elif scelta == "Gestione Utenti":
-        st.subheader("Aggiungi Personale")
-        with st.form("add"):
-            n = st.text_input("Nome e Cognome")
-            if st.form_submit_button("Aggiungi"):
-                nuovo = pd.DataFrame({'Nome':[n], 'Saldo_Arretrato':[0], 'Password':[PASSWORD_STANDARD], 'Primo_Accesso':[True]})
+    elif menu == "Gestione Utenti":
+        st.subheader("Crea Nuovo Dipendente")
+        with st.form("new"):
+            nome_n = st.text_input("Nome e Cognome")
+            saldo_n = st.number_input("Saldo Arretrato fine 2025", value=0.0)
+            if st.form_submit_button("Crea"):
+                nuovo = pd.DataFrame({'Nome':[nome_n], 'Saldo_Arretrato':[saldo_n], 'Password':[PASSWORD_STANDARD], 'Primo_Accesso':[True]})
                 df_dipendenti = pd.concat([df_dipendenti, nuovo], ignore_index=True)
                 df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
-                st.success(f"Aggiunto {n}")
+                st.success("Creato!")
                 st.rerun()
+        
+        st.divider()
+        if not df_dipendenti.empty:
+            u_del = st.selectbox("Elimina o Reset Utente", df_dipendenti['Nome'])
+            c1, c2 = st.columns(2)
+            if c1.button("Reset Password (12345)"):
+                idx = df_dipendenti.index[df_dipendenti['Nome'] == u_del].tolist()[0]
+                df_dipendenti.at[idx, 'Password'] = PASSWORD_STANDARD
+                df_dipendenti.at[idx, 'Primo_Accesso'] = True
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.info(f"Password di {u_del} resettata.")
+            if c2.button("Elimina Definitivamente"):
+                df_dipendenti = df_dipendenti[df_dipendenti['Nome'] != u_del]
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.warning(f"{u_del} eliminato.")
+                st.rerun()
+
+    elif menu == "Storico":
+        st.subheader("Tutte le prenotazioni")
+        st.table(df_ferie)
+        
