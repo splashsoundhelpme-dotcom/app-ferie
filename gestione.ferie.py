@@ -13,21 +13,14 @@ FILE_FERIE = 'db_ferie.csv'
 EMAIL_NOTIFICA = "lorenzo.rossini@battistolli.it"
 
 def carica_dati():
-    # Creazione file dipendenti se vuoto o inesistente
+    # Gestione file dipendenti
     if not os.path.exists(FILE_DIPENDENTI) or os.stat(FILE_DIPENDENTI).st_size == 0:
-        # Quando mi manderai l'elenco, aggiornerò questi nomi e saldi
-        dati_iniziali = {
-            'Nome': ['Lorenzo Rossini'], 
-            'Saldo_Arretrato': [0.0],
-            'Password': [PASSWORD_STANDARD],
-            'Primo_Accesso': [True]
-        }
-        df_dip = pd.DataFrame(dati_iniziali)
+        df_dip = pd.DataFrame(columns=['Nome', 'Saldo_Arretrato', 'Password', 'Primo_Accesso'])
         df_dip.to_csv(FILE_DIPENDENTI, index=False)
     else:
         df_dip = pd.read_csv(FILE_DIPENDENTI)
     
-    # Creazione file ferie se vuoto o inesistente
+    # Gestione file ferie
     if not os.path.exists(FILE_FERIE) or os.stat(FILE_FERIE).st_size == 0:
         df_ferie = pd.DataFrame(columns=['Nome', 'Inizio', 'Fine', 'Tipo', 'Giorni'])
         df_ferie.to_csv(FILE_FERIE, index=False)
@@ -46,10 +39,9 @@ def calcola_ferie_maturate_2026(saldo_arretrato):
     return round(float(saldo_arretrato) + (mesi * 2.33), 2)
 
 def verifica_disponibilita(inizio, fine, df_esistente, tipo_richiesta):
-    # Logica Salta Fila
+    # SALTA FILA: 104, Congedo, Donazione Sangue
     if tipo_richiesta in ["104", "Congedo Parentale", "Donazione Sangue"]:
         return True, None
-    
     giorni_richiesti = pd.date_range(start=inizio, end=fine).date
     for giorno in giorni_richiesti:
         assenti = df_esistente[(df_esistente['Inizio'] <= giorno) & (df_esistente['Fine'] >= giorno)]
@@ -61,11 +53,11 @@ df_dipendenti, df_ferie = carica_dati()
 
 # --- LOGIN ---
 if "user" not in st.session_state:
-    st.title("🔐 Portale Ferie & Assenze")
+    st.title("🔐 Portale Ferie Battistolli")
     nome_input = st.text_input("Nome Utente")
     pwd_input = st.text_input("Password", type="password")
     
-    if st.button("ACCEDI"):
+    if st.button("Entra"):
         if nome_input == "admin" and pwd_input == PASSWORD_ADMIN:
             st.session_state["user"] = "admin"
             st.rerun()
@@ -77,35 +69,85 @@ if "user" not in st.session_state:
                 st.session_state["user"] = utente.iloc[0]['Nome']
                 st.rerun()
             else:
-                st.error("Credenziali non valide.")
+                st.error("Credenziali errate.")
         else:
-            st.error("Database vuoto. Accedere come admin.")
+            st.error("Nessun utente in lista. Accedi come admin.")
     st.stop()
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.write(f"Utente: **{st.session_state['user']}**")
-    if st.button("🚪 Esci"):
-        del st.session_state["user"]
-        st.rerun()
+# --- SIDEBAR LOGOUT ---
+if st.sidebar.button("Esci / Logout"):
+    del st.session_state["user"]
+    st.rerun()
 
 # --- AREA DIPENDENTE ---
 if st.session_state["user"] != "admin":
     nome_u = st.session_state["user"]
-    st.header(f"👋 Pannello di {nome_u}")
+    st.header(f"👋 Ciao {nome_u}")
     
+    # Calcolo Saldo
     dati_u = df_dipendenti[df_dipendenti['Nome'] == nome_u].iloc[0]
-    
-    # Saldo Ferie
     maturato = calcola_ferie_maturate_2026(dati_u['Saldo_Arretrato'])
     usate = df_ferie[(df_ferie['Nome'] == nome_u) & (df_ferie['Tipo'] == 'Ferie')]['Giorni'].sum()
-    st.metric("Saldo Ferie Stimato (ad oggi)", f"{round(maturato - usate, 2)} gg")
+    st.metric("Saldo Ferie Residuo", f"{round(maturato - usate, 2)} gg")
 
-    # Inserimento Richiesta
-    with st.form("nuova_richiesta"):
-        tipo = st.selectbox("Motivo Assenza", ["Ferie", "104", "Congedo Parentale", "Donazione Sangue", "Altro"])
+    with st.form("richiesta"):
+        tipo = st.selectbox("Motivo", ["Ferie", "104", "Congedo Parentale", "Donazione Sangue", "Altro"])
         c1, c2 = st.columns(2)
-        inizio = c1.date_input("Dalla data", format="DD/MM/YYYY")
-        fine = c2.date_input("Alla data", format="DD/MM/YYYY")
-        
-        if st.
+        inizio = c1.date_input("Inizio", format="DD/MM/YYYY")
+        fine = c2.date_input("Fine", format="DD/MM/YYYY")
+        if st.form_submit_button("INVIA"):
+            ok, g_pieno = verifica_disponibilita(inizio, fine, df_ferie, tipo)
+            if ok:
+                g = calcola_giorni_lavorativi(inizio, fine)
+                nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[tipo],'Giorni':[g]})
+                df_ferie = pd.concat([df_ferie, nuova], ignore_index=True)
+                df_ferie.to_csv(FILE_FERIE, index=False)
+                st.success(f"✅ Inviata! Notifica a {EMAIL_NOTIFICA}")
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error(f"⛔ Limite raggiunto il {g_pieno.strftime('%d/%m/%Y')}")
+
+# --- AREA ADMIN ---
+else:
+    st.title("👨‍💼 Admin Dashboard")
+    scelta = st.sidebar.radio("Menu", ["Planning", "Gestione Utenti", "Elimina Richieste"])
+
+    if scelta == "Planning":
+        st.subheader("🗓️ Situazione Settimanale")
+        d_rif = st.date_input("Inizio settimana", date.today(), format="DD/MM/YYYY")
+        giorni = [d_rif + timedelta(days=i) for i in range(7)]
+        plan = []
+        for _, r in df_dipendenti.iterrows():
+            fila = {"Dipendente": r['Nome']}
+            for g in giorni:
+                ass = df_ferie[(df_ferie['Nome'] == r['Nome']) & (df_ferie['Inizio'] <= g) & (df_ferie['Fine'] >= g)]
+                fila[g.strftime("%d/%m")] = f"❌ {ass.iloc[0]['Tipo']}" if not ass.empty else "✅"
+            plan.append(fila)
+        st.dataframe(pd.DataFrame(plan), use_container_width=True)
+
+    elif scelta == "Gestione Utenti":
+        st.subheader("Aggiungi Dipendente")
+        with st.form("new"):
+            n = st.text_input("Nome Cognome")
+            s = st.number_input("Saldo Arretrato fine 2025", value=0.0)
+            if st.form_submit_button("Crea"):
+                nuovo = pd.DataFrame({'Nome':[n], 'Saldo_Arretrato':[s], 'Password':[PASSWORD_STANDARD], 'Primo_Accesso':[True]})
+                df_dipendenti = pd.concat([df_dipendenti, nuovo], ignore_index=True)
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.success("Fatto! Ricarico...")
+                time.sleep(1)
+                st.rerun()
+
+    elif scelta == "Elimina Richieste":
+        st.subheader("🛠️ Cancella Prenotazioni")
+        if not df_ferie.empty:
+            for i, row in df_ferie.iterrows():
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"**{row['Nome']}**: {row['Tipo']} ({row['Inizio']} - {row['Fine']})")
+                if c2.button("Elimina", key=f"del_{i}"):
+                    df_ferie = df_ferie.drop(i)
+                    df_ferie.to_csv(FILE_FERIE, index=False)
+                    st.rerun()
+        else:
+            st.info("Nessuna richiesta presente.")
