@@ -60,15 +60,19 @@ if "user" not in st.session_state:
             st.session_state["user"] = "admin"
             st.rerun()
         else:
-            df_dipendenti['Nome_Lower'] = df_dipendenti['Nome'].str.lower().str.strip()
-            nome_cercato = nome_input.lower().strip()
-            utente = df_dipendenti[(df_dipendenti['Nome_Lower'] == nome_cercat) & (df_dipendenti['Password'].astype(str) == pwd_input)]
-            
-            if not utente.empty:
-                st.session_state["user"] = utente.iloc[0]['Nome']
-                st.rerun()
+            if not df_dipendenti.empty:
+                df_dipendenti['Nome_Lower'] = df_dipendenti['Nome'].str.lower().str.strip()
+                nome_cercato = nome_input.lower().strip()
+                # CORREZIONE: Variabile nome_cercato scritta correttamente
+                utente = df_dipendenti[(df_dipendenti['Nome_Lower'] == nome_cercato) & (df_dipendenti['Password'].astype(str) == pwd_input)]
+                
+                if not utente.empty:
+                    st.session_state["user"] = utente.iloc[0]['Nome']
+                    st.rerun()
+                else:
+                    st.error("Accesso negato. Verifica Nome e Password.")
             else:
-                st.error("Accesso negato. Verifica Nome e Password.")
+                st.error("Nessun dipendente registrato. Contatta l'amministratore.")
     st.stop()
 
 # --- CAMBIO PASSWORD ---
@@ -137,9 +141,12 @@ else:
 
     elif menu == "Storico":
         df_vis = df_ferie.copy()
-        df_vis['Inizio'] = pd.to_datetime(df_vis['Inizio']).dt.strftime('%d/%m/%Y')
-        df_vis['Fine'] = pd.to_datetime(df_vis['Fine']).dt.strftime('%d/%m/%Y')
-        st.table(df_vis)
+        if not df_vis.empty:
+            df_vis['Inizio'] = pd.to_datetime(df_vis['Inizio']).dt.strftime('%d/%m/%Y')
+            df_vis['Fine'] = pd.to_datetime(df_vis['Fine']).dt.strftime('%d/%m/%Y')
+            st.table(df_vis)
+        else:
+            st.write("Ancora nessuna richiesta registrata.")
     
     else:
         st.subheader("🆕 Aggiungi Dipendente")
@@ -165,11 +172,12 @@ else:
                 st.warning(f"Password di {user_reset} resettata.")
 
             st.divider()
-            st.subheader("🗑️ Elimina")
-            da_elim = st.selectbox("Elimina dipendente", df_dipendenti['Nome'], key="del")
+            st.subheader("🗑️ Elimina Risorsa")
+            da_elim = st.selectbox("Seleziona chi eliminare", df_dipendenti['Nome'], key="del_box")
             if st.button("Elimina Definitivamente"):
                 df_dipendenti = df_dipendenti[df_dipendenti['Nome'] != da_elim]
                 df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
                 df_ferie = df_ferie[df_ferie['Nome'] != da_elim]
                 df_ferie.to_csv(FILE_FERIE, index=False)
+                st.success(f"Eliminato {da_elim}")
                 st.rerun()
