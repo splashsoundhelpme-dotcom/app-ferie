@@ -22,7 +22,6 @@ def carica_dati():
         df_ferie.to_csv(FILE_FERIE, index=False)
     else:
         df_ferie = pd.read_csv(FILE_FERIE)
-        # Assicuriamoci che siano oggetti data
         df_ferie['Inizio'] = pd.to_datetime(df_ferie['Inizio']).dt.date
         df_ferie['Fine'] = pd.to_datetime(df_ferie['Fine']).dt.date
     return df_dip, df_ferie
@@ -54,13 +53,109 @@ df_dipendenti, df_ferie = carica_dati()
 # --- ACCESSO ---
 if "user" not in st.session_state:
     st.title("🔐 Portale Aziendale")
-    nome_input = st.text_input("Nome Utente (Esatto come registrato)")
+    nome_input = st.text_input("Nome Utente")
     pwd_input = st.text_input("Password", type="password")
     if st.button("Entra"):
         if nome_input == "admin" and pwd_input == PASSWORD_ADMIN:
             st.session_state["user"] = "admin"
             st.rerun()
         else:
-            # Controllo minuscole/maiuscole e spazi per facilitare l'accesso
+            # RIGA CORRETTA QUI SOTTO
             df_dipendenti['Nome_Lower'] = df_dipendenti['Nome'].str.lower().str.strip()
-            utente = df_dipendenti[(df_dipendenti['Nome_Lower'] == nome_input.lower().strip()) & (df_dipendenti['Password'].astype
+            nome_cercato = nome_input.lower().strip()
+            utente = df_dipendenti[(df_dipendenti['Nome_Lower'] == nome_cercato) & (df_dipendenti['Password'].astype(str) == pwd_input)]
+            
+            if not utente.empty:
+                st.session_state["user"] = utente.iloc[0]['Nome']
+                st.rerun()
+            else:
+                st.error("Accesso negato. Controlla Nome e Password.")
+    st.stop()
+
+# --- CAMBIO PASSWORD ---
+if st.session_state["user"] != "admin":
+    idx_l = df_dipendenti.index[df_dipendenti['Nome'] == st.session_state["user"]].tolist()
+    if idx_l and df_dipendenti.at[idx_l[0], 'Primo_Accesso']:
+        st.warning("🔒 Primo Accesso: Imposta una password personale.")
+        n_p = st.text_input("Nuova password", type="password")
+        if st.button("Salva Nuova Password"):
+            if len(n_p) >= 4:
+                df_dipendenti.at[idx_l[0], 'Password'] = n_p
+                df_dipendenti.at[idx_l[0], 'Primo_Accesso'] = False
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.success("Password salvata!")
+                st.rerun()
+            else:
+                st.error("Minimo 4 caratteri.")
+        st.stop()
+
+if st.sidebar.button("Esci / Logout"):
+    del st.session_state["user"]
+    st.rerun()
+
+# --- AREA DIPENDENTE ---
+if st.session_state["user"] != "admin":
+    nome_u = st.session_state["user"]
+    st.title(f"👋 Pannello di {nome_u}")
+    dati_u = df_dipendenti[df_dipendenti['Nome'] == nome_u].iloc[0]
+    tot_maturato = calcola_ferie_maturate_2026(dati_u['Saldo_Arretrato'])
+    usate = df_ferie[(df_ferie['Nome'] == nome_u) & (df_ferie['Tipo'] == 'Ferie')]['Giorni'].sum()
+    st.metric("Saldo Attuale (GG/MM/AAAA)", f"{round(tot_maturato - usate, 2)} gg")
+
+    with st.form("form_invio"):
+        motivazione = st.selectbox("Motivazione", ["Ferie", "104", "Congedo Parentale", "Donazione Sangue", "Altro"])
+        inizio = st.date_input("Dalla data", format="DD/MM/YYYY")
+        fine = st.date_input("Alla data", format="DD/MM/YYYY")
+        if st.form_submit_button("Invia"):
+            eccezioni = ["104", "Congedo Parentale", "Donazione Sangue"]
+            disponibile, giorno_critico = verifica_disponibilita(inizio, fine, df_ferie)
+            if motivazione in eccezioni or disponibile:
+                g = calcola_giorni_lavorativi(inizio, fine)
+                nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[motivazione],'Giorni':[g]})
+                df_ferie = pd.concat([df_ferie, nuova], ignore_index=True)
+                df_ferie.to_csv(FILE_FERIE, index=False)
+                st.success(f"Registrato dal {inizio.strftime('%d/%m/%Y')} al {fine.strftime('%d/%m/%Y')}")
+                st.rerun()
+            else:
+                st.error(f"Limite 3 persone raggiunto il {giorno_critico.strftime('%d/%m/%Y')}")
+
+# --- AREA ADMIN ---
+else:
+    st.title("👨‍💼 Portale Admin")
+    menu = st.sidebar.radio("Navigazione", ["Planning Settimanale", "Storico", "Gestione Personale"])
+
+    if menu == "Planning Settimanale":
+        data_rif = st.date_input("Inizio settimana", date.today(), format="DD/MM/YYYY")
+        giorni_settimana = [data_rif + timedelta(days=i) for i in range(7)]
+        planning_data = []
+        for _, dip in df_dipendenti.iterrows():
+            fila = {"Dipendente": dip['Nome']}
+            for g in giorni_settimana:
+                assenza = df_ferie[(df_ferie['Nome'] == dip['Nome']) & (df_ferie['Inizio'] <= g) & (df_ferie['Fine'] >= g)]
+                col_name = g.strftime("%d/%m/%Y")
+                fila[col_name] = f"❌ {assenza.iloc[0]['Tipo']}" if not assenza.empty else "✅ Presente"
+            planning_data.append(fila)
+        st.dataframe(pd.DataFrame(planning_data), use_container_width=True)
+
+    elif menu == "Storico":
+        st.table(df_ferie)
+    
+    else:
+        with st.form("nuovo"):
+            n = st.text_input("Nome e Cognome")
+            s = st.number_input("Saldo Arretrato fine 2025", value=0.0)
+            if st.form_submit_button("Crea"):
+                nuovo = pd.DataFrame({'Nome':[n], 'Saldo_Arretrato':[s], 'Password':[PASSWORD_STANDARD], 'Primo_Accesso':[True]})
+                df_dipendenti = pd.concat([df_dipendenti, nuovo], ignore_index=True)
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.success("Account creato!")
+                st.rerun()
+
+        st.divider()
+        if not df_dipendenti.empty:
+            da_elim = st.selectbox("Elimina dipendente", df_dipendenti['Nome'])
+            if st.button("Elimina Definitivamente"):
+                df_dipendenti = df_dipendenti[df_dipendenti['Nome'] != da_elim]
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.warning(f"Rimosso {da_elim}")
+                st.rerun()
