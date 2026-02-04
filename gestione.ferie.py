@@ -60,16 +60,15 @@ if "user" not in st.session_state:
             st.session_state["user"] = "admin"
             st.rerun()
         else:
-            # RIGA CORRETTA QUI SOTTO
             df_dipendenti['Nome_Lower'] = df_dipendenti['Nome'].str.lower().str.strip()
             nome_cercato = nome_input.lower().strip()
-            utente = df_dipendenti[(df_dipendenti['Nome_Lower'] == nome_cercato) & (df_dipendenti['Password'].astype(str) == pwd_input)]
+            utente = df_dipendenti[(df_dipendenti['Nome_Lower'] == nome_cercat) & (df_dipendenti['Password'].astype(str) == pwd_input)]
             
             if not utente.empty:
                 st.session_state["user"] = utente.iloc[0]['Nome']
                 st.rerun()
             else:
-                st.error("Accesso negato. Controlla Nome e Password.")
+                st.error("Accesso negato. Verifica Nome e Password.")
     st.stop()
 
 # --- CAMBIO PASSWORD ---
@@ -78,7 +77,7 @@ if st.session_state["user"] != "admin":
     if idx_l and df_dipendenti.at[idx_l[0], 'Primo_Accesso']:
         st.warning("🔒 Primo Accesso: Imposta una password personale.")
         n_p = st.text_input("Nuova password", type="password")
-        if st.button("Salva Nuova Password"):
+        if st.button("Salva Password"):
             if len(n_p) >= 4:
                 df_dipendenti.at[idx_l[0], 'Password'] = n_p
                 df_dipendenti.at[idx_l[0], 'Primo_Accesso'] = False
@@ -100,7 +99,7 @@ if st.session_state["user"] != "admin":
     dati_u = df_dipendenti[df_dipendenti['Nome'] == nome_u].iloc[0]
     tot_maturato = calcola_ferie_maturate_2026(dati_u['Saldo_Arretrato'])
     usate = df_ferie[(df_ferie['Nome'] == nome_u) & (df_ferie['Tipo'] == 'Ferie')]['Giorni'].sum()
-    st.metric("Saldo Attuale (GG/MM/AAAA)", f"{round(tot_maturato - usate, 2)} gg")
+    st.metric("Saldo Attuale", f"{round(tot_maturato - usate, 2)} gg")
 
     with st.form("form_invio"):
         motivazione = st.selectbox("Motivazione", ["Ferie", "104", "Congedo Parentale", "Donazione Sangue", "Altro"])
@@ -114,10 +113,10 @@ if st.session_state["user"] != "admin":
                 nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[motivazione],'Giorni':[g]})
                 df_ferie = pd.concat([df_ferie, nuova], ignore_index=True)
                 df_ferie.to_csv(FILE_FERIE, index=False)
-                st.success(f"Registrato dal {inizio.strftime('%d/%m/%Y')} al {fine.strftime('%d/%m/%Y')}")
+                st.success(f"Registrato!")
                 st.rerun()
             else:
-                st.error(f"Limite 3 persone raggiunto il {giorno_critico.strftime('%d/%m/%Y')}")
+                st.error(f"Saturazione il {giorno_critico.strftime('%d/%m/%Y')}")
 
 # --- AREA ADMIN ---
 else:
@@ -126,21 +125,24 @@ else:
 
     if menu == "Planning Settimanale":
         data_rif = st.date_input("Inizio settimana", date.today(), format="DD/MM/YYYY")
-        giorni_settimana = [data_rif + timedelta(days=i) for i in range(7)]
+        giorni_sett = [data_rif + timedelta(days=i) for i in range(7)]
         planning_data = []
         for _, dip in df_dipendenti.iterrows():
             fila = {"Dipendente": dip['Nome']}
-            for g in giorni_settimana:
-                assenza = df_ferie[(df_ferie['Nome'] == dip['Nome']) & (df_ferie['Inizio'] <= g) & (df_ferie['Fine'] >= g)]
-                col_name = g.strftime("%d/%m/%Y")
-                fila[col_name] = f"❌ {assenza.iloc[0]['Tipo']}" if not assenza.empty else "✅ Presente"
+            for g in giorni_sett:
+                ass = df_ferie[(df_ferie['Nome'] == dip['Nome']) & (df_ferie['Inizio'] <= g) & (df_ferie['Fine'] >= g)]
+                fila[g.strftime("%d/%m/%Y")] = f"❌ {ass.iloc[0]['Tipo']}" if not ass.empty else "✅ Presente"
             planning_data.append(fila)
         st.dataframe(pd.DataFrame(planning_data), use_container_width=True)
 
     elif menu == "Storico":
-        st.table(df_ferie)
+        df_vis = df_ferie.copy()
+        df_vis['Inizio'] = pd.to_datetime(df_vis['Inizio']).dt.strftime('%d/%m/%Y')
+        df_vis['Fine'] = pd.to_datetime(df_vis['Fine']).dt.strftime('%d/%m/%Y')
+        st.table(df_vis)
     
     else:
+        st.subheader("🆕 Aggiungi Dipendente")
         with st.form("nuovo"):
             n = st.text_input("Nome e Cognome")
             s = st.number_input("Saldo Arretrato fine 2025", value=0.0)
@@ -153,9 +155,21 @@ else:
 
         st.divider()
         if not df_dipendenti.empty:
-            da_elim = st.selectbox("Elimina dipendente", df_dipendenti['Nome'])
+            st.subheader("🆘 Reset Password")
+            user_reset = st.selectbox("Seleziona utente per reset PW", df_dipendenti['Nome'])
+            if st.button("Riporta Password a 12345"):
+                idx_r = df_dipendenti.index[df_dipendenti['Nome'] == user_reset].tolist()[0]
+                df_dipendenti.at[idx_r, 'Password'] = PASSWORD_STANDARD
+                df_dipendenti.at[idx_r, 'Primo_Accesso'] = True
+                df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.warning(f"Password di {user_reset} resettata.")
+
+            st.divider()
+            st.subheader("🗑️ Elimina")
+            da_elim = st.selectbox("Elimina dipendente", df_dipendenti['Nome'], key="del")
             if st.button("Elimina Definitivamente"):
                 df_dipendenti = df_dipendenti[df_dipendenti['Nome'] != da_elim]
                 df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
-                st.warning(f"Rimosso {da_elim}")
+                df_ferie = df_ferie[df_ferie['Nome'] != da_elim]
+                df_ferie.to_csv(FILE_FERIE, index=False)
                 st.rerun()
