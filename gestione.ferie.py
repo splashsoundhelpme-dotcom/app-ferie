@@ -52,7 +52,7 @@ df_dipendenti, df_ferie = carica_dati()
 
 # --- ACCESSO ---
 if "user" not in st.session_state:
-    st.title("🔐 Portale Aziendale Gestione Turni")
+    st.title("🔐 Portale Aziendale")
     nome_input = st.text_input("Nome Utente")
     pwd_input = st.text_input("Password", type="password")
     if st.button("Entra"):
@@ -118,16 +118,12 @@ else:
     if menu == "Planning Settimanale":
         st.subheader("🗓️ Visualizzazione Turni per Settimana")
         data_rif = st.date_input("Seleziona il giorno di inizio settimana", date.today())
-        # Calcolo i 7 giorni della settimana
         giorni_settimana = [data_rif + timedelta(days=i) for i in range(7)]
-        nomi_giorni = [g.strftime("%a %d/%m") for g in giorni_settimana]
         
-        # Costruzione matrice planning
         planning_data = []
         for _, dip in df_dipendenti.iterrows():
             fila = {"Dipendente": dip['Nome']}
             for g in giorni_settimana:
-                # Cerco se il dipendente ha qualcosa in quel giorno
                 assenza = df_ferie[(df_ferie['Nome'] == dip['Nome']) & (df_ferie['Inizio'] <= g) & (df_ferie['Fine'] >= g)]
                 if not assenza.empty:
                     tipo = assenza.iloc[0]['Tipo']
@@ -137,20 +133,37 @@ else:
             planning_data.append(fila)
         
         df_plan = pd.DataFrame(planning_data)
-        st.dataframe(df_plan.style.applymap(lambda x: 'color: red' if '❌' in str(x) else 'color: green'), use_container_width=True)
-        
-        st.info("💡 Legenda: ✅ = Disponibile | ❌ = Assente (con motivo)")
+        st.dataframe(df_plan, use_container_width=True)
 
     elif menu == "Tabellone Generale":
-        st.write("### Riepilogo Saldi", df_ferie)
+        st.write("### Riepilogo Storico", df_ferie)
     
     else:
-        # Codice per aggiunta dipendenti... (come prima)
+        st.subheader("🆕 Aggiungi Dipendente")
         with st.form("nuovo"):
-            n = st.text_input("Nome")
-            s = st.number_input("Saldo Arretrato", value=0.0)
-            if st.form_submit_button("Crea"):
+            n = st.text_input("Nome e Cognome")
+            s = st.number_input("Saldo Arretrato fine 2025", value=0.0)
+            if st.form_submit_button("Crea Account"):
                 nuovo = pd.DataFrame({'Nome':[n], 'Saldo_Arretrato':[s], 'Password':[PASSWORD_STANDARD], 'Primo_Accesso':[True]})
                 df_dipendenti = pd.concat([df_dipendenti, nuovo], ignore_index=True)
                 df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                st.success(f"Account creato per {n}")
                 st.rerun()
+
+        st.divider()
+        st.subheader("🗑️ Rimuovi Dipendente")
+        if not df_dipendenti.empty:
+            da_eliminare = st.selectbox("Seleziona dipendente da eliminare", df_dipendenti['Nome'])
+            confirm = st.checkbox(f"Confermo di voler eliminare definitivamente {da_eliminare}")
+            if st.button("ELIMINA ORA"):
+                if confirm:
+                    # Rimuovi dai dipendenti
+                    df_dipendenti = df_dipendenti[df_dipendenti['Nome'] != da_eliminare]
+                    df_dipendenti.to_csv(FILE_DIPENDENTI, index=False)
+                    # Rimuovi anche le sue ferie registrate
+                    df_ferie = df_ferie[df_ferie['Nome'] != da_eliminare]
+                    df_ferie.to_csv(FILE_FERIE, index=False)
+                    st.warning(f"Utente {da_eliminare} eliminato correttamente.")
+                    st.rerun()
+                else:
+                    st.error("Spunta la casella di conferma per procedere.")
