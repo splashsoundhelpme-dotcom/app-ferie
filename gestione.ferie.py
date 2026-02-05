@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import date, timedelta
-import numpy as np
 import time
 
 # --- CONFIGURAZIONE ---
@@ -11,8 +10,8 @@ PASSWORD_STANDARD_DEFAULT = "12345"
 FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
 ORE_GIORNATA = 6.67
-SETTIMANA_LAVORATIVA = '1111110' 
 
+# Festività Nazionali 2025-2026 (Non scalano ore dal saldo)
 FESTIVITA = [
     '2025-01-01', '2025-01-06', '2025-04-21', '2025-04-25', '2025-05-01', 
     '2025-06-02', '2025-08-15', '2025-11-01', '2025-12-08', '2025-12-25', '2025-12-26',
@@ -20,19 +19,15 @@ FESTIVITA = [
     '2026-06-02', '2026-08-15', '2026-11-01', '2026-12-08', '2026-12-25', '2026-12-26'
 ]
 
-GUARDIE_GIURATE = [
-    "ROSSINI LORENZO", "LAMADDALENA ANTONIO", "MILILLO GENNARO", 
-    "BUFANO GIULIO", "LOBASCIO MICHELE", "RENNA GIUSEPPE", 
-    "FIORE ANTONIO", "FAVIA ANTONIO"
-]
+# Elenco specifico Guardie Giurate
+GG_LIST = ["ROSSINI LORENZO", "LAMADDALENA ANTONIO", "MILILLO GENNARO", "BUFANO GIULIO", "LOBASCIO MICHELE", "RENNA GIUSEPPE", "FIORE ANTONIO", "FAVIA ANTONIO"]
 
-st.set_page_config(page_title="Battistolli HR v16.2", layout="wide")
+st.set_page_config(page_title="Battistolli HR Portal v17.5", layout="wide")
 
-# --- FUNZIONE DI RIPARAZIONE DATABASE ---
-def inizializza_e_ripara():
-    # 1. Gestione Database Dipendenti
+# --- DATABASE ENGINE ---
+def load_data():
     if not os.path.exists(FILE_DIPENDENTI):
-        dati_iniziali = [
+        nomi = [
             ["ABBATICCHIO ANTONIO", 53.13, 11.24], ["ACQUAVIVA ANNALISA", 126.40, 72.63],
             ["ANTONACCI MARIO", 146.92, 43.98], ["BERGAMASCO COSIMO DAMIANO", 186.60, 47.81],
             ["BOTTALICO LEONARDO", 133.42, 9.33], ["BOZZI RAFFAELLA", 258.08, 106.60],
@@ -57,136 +52,92 @@ def inizializza_e_ripara():
             ["LOBASCIO MICHELE", 34.04, 0.0], ["ROSSINI LORENZO", 6.40, 0.0],
             ["FAVIA ANTONIO", 0.0, 0.0]
         ]
-        df_d = pd.DataFrame(dati_iniziali, columns=['Nome', 'Ferie', 'ROL'])
-        df_d['Password'] = PASSWORD_STANDARD_DEFAULT
-        df_d['Contratto'] = df_d['Nome'].apply(lambda x: 'Guardia' if x in GUARDIE_GIURATE else 'Fiduciario')
-        df_d.to_csv(FILE_DIPENDENTI, index=False)
-    else:
-        df_d = pd.read_csv(FILE_DIPENDENTI)
-        # Riparazione colonne mancanti (Fix KeyError)
-        if 'Contratto' not in df_d.columns:
-            df_d['Contratto'] = df_d['Nome'].apply(lambda x: 'Guardia' if x in GUARDIE_GIURATE else 'Fiduciario')
-            df_d.to_csv(FILE_DIPENDENTI, index=False)
-        if 'Password' not in df_d.columns:
-            df_d['Password'] = PASSWORD_STANDARD_DEFAULT
-            df_d.to_csv(FILE_DIPENDENTI, index=False)
-
-    # 2. Gestione Database Ferie (Richieste)
+        df = pd.DataFrame(nomi, columns=['Nome', 'Ferie', 'ROL'])
+        df['Password'] = PASSWORD_STANDARD_DEFAULT
+        df['Contratto'] = df['Nome'].apply(lambda x: 'Guardia' if x in GG_LIST else 'Fiduciario')
+        df.to_csv(FILE_DIPENDENTI, index=False)
+    
     if not os.path.exists(FILE_FERIE):
-        pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Ore','Note']).to_csv(FILE_FERIE, index=False)
-    else:
-        df_f = pd.read_csv(FILE_FERIE)
-        # Riparazione colonna 'Risorsa' se mancante (Fix KeyError)
-        if 'Risorsa' not in df_f.columns:
-            df_f['Risorsa'] = 'Ferie' # Imposta default per i vecchi dati
-            df_f.to_csv(FILE_FERIE, index=False)
-            
-    return pd.read_csv(FILE_DIPENDENTI)
+        pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Ore']).to_csv(FILE_FERIE, index=False)
+    
+    return pd.read_csv(FILE_DIPENDENTI), pd.read_csv(FILE_FERIE)
 
-df_dip = inizializza_e_ripara()
+df_dip, df_ferie = load_data()
 
 # --- LOGIN ---
 if "user" not in st.session_state:
-    st.title("🏢 Accesso Battistolli HR")
-    u_in = st.text_input("NOME COGNOME").upper().strip()
-    p_in = st.text_input("Password", type="password").strip()
-    if st.button("ACCEDI"):
-        if u_in == "ADMIN" and p_in == PASSWORD_ADMIN:
+    st.title("🏢 Accesso Portale HR")
+    u = st.text_input("NOME COGNOME").upper().strip()
+    p = st.text_input("Password", type="password")
+    if st.button("LOGIN"):
+        if u == "ADMIN" and p == PASSWORD_ADMIN:
             st.session_state["user"] = "admin"; st.rerun()
-        else:
-            user_row = df_dip[df_dip['Nome'] == u_in]
-            if not user_row.empty and str(user_row.iloc[0]['Password']) == p_in:
-                st.session_state["user"] = u_in; st.rerun()
-            else: st.error("Dati non corretti.")
+        elif u in df_dip['Nome'].values:
+            if str(df_dip[df_dip['Nome']==u]['Password'].values[0]) == p:
+                st.session_state["user"] = u; st.rerun()
+        else: st.error("Dati errati")
     st.stop()
 
-# --- SIDEBAR ---
+# --- INTERFACCIA ---
 with st.sidebar:
-    st.header(f"👤 {st.session_state['user']}")
-    if st.session_state["user"] != "admin":
-        st.divider()
-        npw = st.text_input("Nuova Password", type="password")
-        if st.button("Aggiorna"):
-            df_dip.loc[df_dip['Nome'] == st.session_state['user'], 'Password'] = npw
-            df_dip.to_csv(FILE_DIPENDENTI, index=False); st.success("Salvata!")
+    st.write(f"Utente: **{st.session_state['user']}**")
     if st.button("LOGOUT"): del st.session_state["user"]; st.rerun()
 
-# --- ADMIN ---
+# --- LOGICA ADMIN ---
 if st.session_state["user"] == "admin":
-    st.title("👨‍💼 Console Amministratore")
-    t1, t2, t3 = st.tabs(["Registro Richieste", "Saldi Personale", "Sistema"])
+    st.header("👨‍💼 Console Amministrazione")
+    tab1, tab2 = st.tabs(["Saldi Attuali", "Registro Richieste"])
     
-    with t1:
-        df_f = pd.read_csv(FILE_FERIE)
-        st.dataframe(df_f, use_container_width=True)
-        if not df_f.empty:
-            rid = st.number_input("ID riga da eliminare", 0, len(df_f)-1, 0)
-            if st.button("Elimina"):
-                df_f.drop(df_f.index[rid]).to_csv(FILE_FERIE, index=False); st.rerun()
-
-    with t2:
-        df_f_all = pd.read_csv(FILE_FERIE)
-        df_res = df_dip.copy()
-        
-        def calcola_residuo(row, tipo_r):
-            # Filtro sicuro per evitare errori se il DB è vuoto
-            usato = df_f_all[(df_f_all['Nome'] == row['Nome']) & (df_f_all['Risorsa'] == tipo_r)]['Ore'].sum()
-            ore = round(row[tipo_r] - usato, 2)
-            return f"{ore} h ({round(ore/6.67, 1)} gg)"
-            
-        df_res['Saldo_Ferie'] = df_res.apply(lambda r: calcola_residuo(r, 'Ferie'), axis=1)
-        df_res['Saldo_ROL'] = df_res.apply(lambda r: calcola_residuo(r, 'ROL'), axis=1)
-        
-        st.dataframe(df_res[['Nome', 'Contratto', 'Saldo_Ferie', 'Saldo_ROL']], use_container_width=True)
+    with tab1:
+        res = []
+        for _, r in df_dip.iterrows():
+            f_u = df_ferie[(df_ferie['Nome']==r['Nome']) & (df_ferie['Risorsa']=='Ferie')]['Ore'].sum()
+            r_u = df_ferie[(df_ferie['Nome']==r['Nome']) & (df_ferie['Risorsa']=='ROL')]['Ore'].sum()
+            res.append([r['Nome'], r['Contratto'], round(r['Ferie']-f_u, 2), round(r['ROL']-r_u, 2)])
+        st.dataframe(pd.DataFrame(res, columns=['Nome','Contratto','Ferie (h)','ROL (h)']), use_container_width=True)
         
         if st.button("➕ Applica Maturazione Mensile"):
-            def m_proc(r):
-                if r['Contratto'] == 'Guardia': r['Ferie'] += 14.67; r['ROL'] += 6.67
-                else: r['Ferie'] += 12.23; r['ROL'] += 4.67
-                return r
-            df_dip = df_dip.apply(m_proc, axis=1)
-            df_dip.to_csv(FILE_DIPENDENTI, index=False); st.rerun()
+            df_dip['Ferie'] = df_dip.apply(lambda x: x['Ferie']+14.67 if x['Contratto']=='Guardia' else x['Ferie']+12.23, axis=1)
+            df_dip['ROL'] = df_dip.apply(lambda x: x['ROL']+6.67 if x['Contratto']=='Guardia' else x['ROL']+4.67, axis=1)
+            df_dip.to_csv(FILE_DIPENDENTI, index=False); st.success("Fatto!"); time.sleep(1); st.rerun()
 
-    with t3:
-        if st.button("RESET ARCHIVIO FERIE"):
-            pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Ore','Note']).to_csv(FILE_FERIE, index=False); st.rerun()
+    with tab2:
+        st.dataframe(df_ferie, use_container_width=True)
+        if st.button("Svuota Registro"):
+            pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Ore']).to_csv(FILE_FERIE, index=False); st.rerun()
 
-# --- DIPENDENTE ---
+# --- LOGICA DIPENDENTE ---
 else:
-    nome_u = st.session_state["user"]
-    dati_u = df_dip[df_dip['Nome'] == nome_u].iloc[0]
-    df_f = pd.read_csv(FILE_FERIE)
+    nome = st.session_state["user"]
+    row = df_dip[df_dip['Nome']==nome].iloc[0]
+    f_u = df_ferie[(df_ferie['Nome']==nome) & (df_ferie['Risorsa']=='Ferie')]['Ore'].sum()
+    r_u = df_ferie[(df_ferie['Nome']==nome) & (df_ferie['Risorsa']=='ROL')]['Ore'].sum()
     
-    # Calcolo residui con protezione per file vuoti
-    usato_f = df_f[(df_f['Nome'] == nome_u) & (df_f['Risorsa'] == 'Ferie')]['Ore'].sum() if not df_f.empty else 0
-    usato_r = df_f[(df_f['Nome'] == nome_u) & (df_f['Risorsa'] == 'ROL')]['Ore'].sum() if not df_f.empty else 0
-    
-    st.header(f"Bentornato {nome_u}")
-    st.info(f"Contratto: {dati_u['Contratto']}")
-    
+    st.header(f"Ciao {nome}")
+    st.caption(f"CCNL: {row['Contratto']}")
     c1, c2 = st.columns(2)
-    c1.metric("Ferie Rimaste", f"{round(dati_u['Ferie'] - usato_f, 2)} h")
-    c2.metric("ROL Rimasti", f"{round(dati_u['ROL'] - usato_r, 2)} h")
+    c1.metric("Ferie Residue (h)", round(row['Ferie']-f_u, 2))
+    c2.metric("ROL Residui (h)", round(row['ROL']-r_u, 2))
 
-    with st.form("invio"):
+    with st.form("richiesta"):
         tipo = st.selectbox("Causale", ["Ferie", "ROL", "104", "Donazione Sangue", "Malattia"])
-        risorsa = st.radio("Scala da:", ["Ferie", "ROL"], horizontal=True)
-        da = st.date_input("Inizio"); al = st.date_input("Fine")
+        scalo = st.radio("Da scalare su:", ["Ferie", "ROL"])
+        da = st.date_input("Inizio")
+        al = st.date_input("Fine")
         
         if st.form_submit_button("INVIA"):
-            conflitto = False
             lavorativi = 0
-            # Trasformazione date per confronto
-            df_f['Inizio'] = pd.to_datetime(df_f['Inizio']).dt.date
-            df_f['Fine'] = pd.to_datetime(df_f['Fine']).dt.date
-            
-            for g in pd.date_range(da, al).date:
-                if g.weekday() < 6 and g.strftime('%Y-%m-%d') not in FESTIVITA:
+            bloccato = False
+            for d in pd.date_range(da, al).date:
+                # Sabato incluso (weekday < 6), Domenica esclusa, Festività escluse
+                if d.weekday() < 6 and d.strftime('%Y-%m-%d') not in FESTIVITA:
                     lavorativi += 1
-                    count = len(df_f[(df_f['Inizio'] <= g) & (df_f['Fine'] >= g)])
+                    count = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d)])
                     if count >= 3 and tipo not in ["104", "Donazione Sangue"]:
-                        conflitto = True; st.error(f"Limite 3 assenze raggiunto per il {g}"); break
+                        bloccato = True; st.error(f"Posti esauriti per il giorno {d}"); break
             
-            if not conflitto:
+            if not bloccato and lavorativi > 0:
                 ore = round(lavorativi * ORE_GIORNATA, 2)
-                nuova = pd.DataFrame([[nome_u, da, al
+                nuova = pd.DataFrame([[nome, da, al, tipo, scalo, ore]], columns=['Nome','Inizio','Fine','Tipo','Risorsa','Ore'])
+                nuova.to_csv(FILE_FERIE, mode='a', header=False, index=False)
+                st.success("Richiesta registrata!"); time.sleep(1); st.rerun()
