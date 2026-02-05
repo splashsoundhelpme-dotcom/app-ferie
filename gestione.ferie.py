@@ -10,13 +10,12 @@ PASSWORD_ADMIN = "admin2024"
 PASSWORD_STANDARD = "12345"
 FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
-ORE_GIORNATA = 6.67  # 6 ore e 40 minuti
+ORE_GIORNATA = 6.67
 
-st.set_page_config(page_title="Battistolli HR", layout="wide")
+st.set_page_config(page_title="Battistolli HR Portal", layout="wide", page_icon="🏢")
 
-# --- DATABASE DEFINITIVO (DA LISTA TESTUALE) ---
-def genera_database_corretto():
-    # Dati inseriti manualmente dalla tua lista
+# --- GENERAZIONE DATABASE REALE (DA TUO TESTO) ---
+def inizializza_sistema():
     dati = [
         ["ABBATICCHIO ANTONIO", 53.13, 11.24], ["ACQUAVIVA ANNALISA", 126.40, 72.63],
         ["ANTONACCI MARIO", 146.92, 43.98], ["BERGAMASCO COSIMO DAMIANO", 186.60, 47.81],
@@ -44,80 +43,105 @@ def genera_database_corretto():
     df = pd.DataFrame(dati, columns=['Nome', 'Ferie', 'ROL'])
     df['Password'] = PASSWORD_STANDARD
     df.to_csv(FILE_DIPENDENTI, index=False)
+    
+    if not os.path.exists(FILE_FERIE):
+        pd.DataFrame(columns=['Nome', 'Inizio', 'Fine', 'Tipo', 'Risorsa', 'Ore', 'Note']).to_csv(FILE_FERIE, index=False)
     return df
 
-# Controllo e Auto-Riparazione
-if os.path.exists(FILE_DIPENDENTI):
-    df_check = pd.read_csv(FILE_DIPENDENTI)
-    if "ABBATICCHIO ANTONIO" not in df_check['Nome'].values:
-        df_dip = genera_database_corretto()
-    else:
-        df_dip = df_check
-else:
-    df_dip = genera_database_corretto()
-
-if not os.path.exists(FILE_FERIE):
-    pd.DataFrame(columns=['Nome', 'Inizio', 'Fine', 'Tipo', 'Risorsa', 'Ore', 'Note']).to_csv(FILE_FERIE, index=False)
+# Avvio forzato con i tuoi dati reali
+df_dip = inizializza_sistema()
 
 # --- LOGIN ---
 if "user" not in st.session_state:
-    st.title("🏢 Gestione Personale Battistolli")
-    u_input = st.text_input("NOME COGNOME (Esempio: ROSSINI LORENZO)").upper().strip()
+    st.title("🏢 Accesso Personale Battistolli")
+    u_input = st.text_input("NOME COGNOME").upper().strip()
     p_input = st.text_input("Password", type="password").strip()
     
     if st.button("ACCEDI"):
         if u_input == "ADMIN" and p_input == PASSWORD_ADMIN:
-            st.session_state["user"] = "admin"; st.rerun()
+            st.session_state["user"] = "admin"
+            st.rerun()
         else:
-            user_row = df_dip[df_dip['Nome'] == u_input]
-            if not user_row.empty and str(user_row.iloc[0]['Password']) == p_input:
-                st.session_state["user"] = u_input; st.rerun()
+            user_data = df_dip[df_dip['Nome'] == u_input]
+            if not user_data.empty and p_input == PASSWORD_STANDARD:
+                st.session_state["user"] = u_input
+                st.rerun()
             else:
-                st.error("Dati non corretti. Usa NOME COGNOME tutto maiuscolo.")
+                st.error("Credenziali non valide. Assicurati di scrivere correttamente NOME e COGNOME.")
     st.stop()
 
-# --- DASHBOARD ---
+# --- LOGICA POST-LOGIN ---
 with st.sidebar:
-    st.write(f"Connesso: **{st.session_state['user']}**")
+    st.success(f"Utente: {st.session_state['user']}")
     if st.button("Logout"):
-        del st.session_state["user"]; st.rerun()
+        del st.session_state["user"]
+        st.rerun()
 
 if st.session_state["user"] != "admin":
     nome_u = st.session_state["user"]
     dati_u = df_dip[df_dip['Nome'] == nome_u].iloc[0]
-    df_f = pd.read_csv(FILE_FERIE)
+    df_ferie_attuali = pd.read_csv(FILE_FERIE)
     
-    # Calcolo residui in tempo reale
-    usato_f = df_f[(df_f['Nome'] == nome_u) & (df_f['Risorsa'] == 'Ferie')]['Ore'].sum()
-    usato_r = df_f[(df_f['Nome'] == nome_u) & (df_f['Risorsa'] == 'ROL')]['Ore'].sum()
+    # Calcolo residui sottraendo l'usato dal saldo iniziale
+    usato_f = df_ferie_attuali[(df_ferie_attuali['Nome'] == nome_u) & (df_ferie_attuali['Risorsa'] == 'Ferie')]['Ore'].sum()
+    usato_r = df_ferie_attuali[(df_ferie_attuali['Nome'] == nome_u) & (df_ferie_attuali['Risorsa'] == 'ROL')]['Ore'].sum()
     
-    st.header(f"Ciao {nome_u}")
-    c1, c2 = st.columns(2)
-    c1.metric("Residuo Ferie", f"{round(dati_u['Ferie'] - usato_f, 2)} h")
-    c2.metric("Residuo ROL", f"{round(dati_u['ROL'] - usato_r, 2)} h")
+    st.header(f"Pannello di {nome_u}")
+    col1, col2 = st.columns(2)
+    col1.metric("RESIDUO FERIE", f"{round(dati_u['Ferie'] - usato_f, 2)} ore")
+    col2.metric("RESIDUO ROL", f"{round(dati_u['ROL'] - usato_r, 2)} ore")
 
     st.divider()
 
-    with st.form("invio"):
-        st.subheader("Nuova Richiesta")
-        tipo = st.selectbox("Motivo", ["Ferie", "ROL", "104", "Donazione Sangue", "Malattia"])
-        risorsa = st.radio("Scala da:", ["Ferie", "ROL"], horizontal=True)
-        inizio = st.date_input("Dal")
-        fine = st.date_input("Al")
-        if st.form_submit_button("Invia"):
+    # Form Richiesta
+    with st.form("richiesta_form"):
+        st.subheader("Inserisci nuova richiesta")
+        tipo = st.selectbox("Motivazione", ["Ferie", "ROL", "104", "Donazione Sangue", "Malattia"])
+        risorsa = st.radio("Scala ore da:", ["Ferie", "ROL"], horizontal=True)
+        inizio = st.date_input("Data inizio")
+        fine = st.date_input("Data fine")
+        note = st.text_area("Note (opzionale)")
+        
+        if st.form_submit_button("INVIA RICHIESTA"):
             if inizio > fine:
-                st.error("Date non valide.")
+                st.error("La data di fine deve essere successiva a quella di inizio.")
             else:
-                gg = int(np.busday_count(inizio, fine + timedelta(days=1)))
-                ore = round(gg * ORE_GIORNATA, 2)
-                nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[tipo],'Risorsa':[risorsa],'Ore':[ore],'Note':[""]})
-                nuova.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                st.success("Richiesta registrata!")
-                time.sleep(1); st.rerun()
+                # Controllo Limite 3 Persone Contemporaneamente
+                giorni_richiesti = pd.date_range(inizio, fine).date
+                conflitto = False
+                if not df_ferie_attuali.empty:
+                    df_ferie_attuali['Inizio'] = pd.to_datetime(df_ferie_attuali['Inizio']).dt.date
+                    df_ferie_attuali['Fine'] = pd.to_datetime(df_ferie_attuali['Fine']).dt.date
+                    
+                    for g in giorni_richiesti:
+                        count = len(df_ferie_attuali[(df_ferie_attuali['Inizio'] <= g) & (df_ferie_attuali['Fine'] >= g)])
+                        if count >= 3 and tipo not in ["104", "Donazione Sangue"]:
+                            conflitto = True
+                            st.error(f"Spiacenti, il giorno {g} ci sono già 3 persone assenti.")
+                            break
+                
+                if not conflitto:
+                    giorni_lav = int(np.busday_count(inizio, fine + timedelta(days=1)))
+                    ore_tot = round(giorni_lav * ORE_GIORNATA, 2)
+                    nuova_riga = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[tipo],'Risorsa':[risorsa],'Ore':[ore_tot],'Note':[note]})
+                    nuova_riga.to_csv(FILE_FERIE, mode='a', header=False, index=False)
+                    st.success(f"Richiesta inviata! Totale ore scalate: {ore_tot}")
+                    time.sleep(1.5)
+                    st.rerun()
+
 else:
-    st.title("💻 Amministrazione")
-    tab1, tab2 = st.tabs(["Richieste", "Personale"])
+    # SEZIONE AMMINISTRATORE
+    st.title("👨‍💼 Gestione Amministrativa")
+    tab1, tab2 = st.tabs(["Storico Richieste", "Anagrafica Saldi"])
+    
     with tab1:
-        st.dataframe(pd.read_csv(FILE_FERIE), use_container_width=True)
+        st.write("Tutte le richieste effettuate dai dipendenti:")
+        if os.path.exists(FILE_FERIE):
+            st.dataframe(pd.read_csv(FILE_FERIE), use_container_width=True)
+            if st.button("Resetta Registro Richieste"):
+                pd.DataFrame(columns=['Nome', 'Inizio', 'Fine', 'Tipo', 'Risorsa', 'Ore', 'Note']).to_csv(FILE_FERIE, index=False)
+                st.rerun()
+
     with tab2:
+        st.write("Situazione attuale dei saldi 2025:")
         st.dataframe(df_dip[['Nome', 'Ferie', 'ROL']], use_container_width=True)
