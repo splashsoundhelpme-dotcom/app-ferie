@@ -5,14 +5,14 @@ from datetime import date, timedelta
 import numpy as np
 import time
 
-# --- CONFIGURAZIONE E COSTANTI ---
+# --- CONFIGURAZIONE ---
 PASSWORD_ADMIN = "admin2024"
 PASSWORD_STANDARD = "12345"
 FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
 ORE_GIORNATA = 6.67
 
-st.set_page_config(page_title="Battistolli HR Portal v3.0", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="Battistolli HR Portal", layout="wide")
 
 # --- DATABASE REALE (44 DIPENDENTI) ---
 def inizializza_sistema():
@@ -44,94 +44,79 @@ def inizializza_sistema():
     df['Password'] = PASSWORD_STANDARD
     df.to_csv(FILE_DIPENDENTI, index=False)
     
-    if not os.path.exists(FILE_FERIE) or os.stat(FILE_FERIE).st_size == 0:
+    if not os.path.exists(FILE_FERIE):
         pd.DataFrame(columns=['Nome', 'Inizio', 'Fine', 'Tipo', 'Risorsa', 'Ore', 'Note']).to_csv(FILE_FERIE, index=False)
     return df
 
 df_dip = inizializza_sistema()
 
-# --- GESTIONE LOGIN ---
+# --- LOGIN ---
 if "user" not in st.session_state:
-    st.title("🏢 Portale HR Battistolli")
+    st.title("🏢 Accesso Battistolli HR")
     u_input = st.text_input("NOME COGNOME").upper().strip()
     p_input = st.text_input("Password", type="password").strip()
     
-    if st.button("ACCEDI", use_container_width=True):
+    if st.button("ACCEDI"):
         if u_input == "ADMIN" and p_input == PASSWORD_ADMIN:
-            st.session_state["user"] = "admin"
-            st.rerun()
+            st.session_state["user"] = "admin"; st.rerun()
         else:
-            user_exists = df_dip[df_dip['Nome'] == u_input]
-            if not user_exists.empty and p_input == PASSWORD_STANDARD:
-                st.session_state["user"] = u_input
-                st.rerun()
+            match = df_dip[df_dip['Nome'] == u_input]
+            if not match.empty and p_input == PASSWORD_STANDARD:
+                st.session_state["user"] = u_input; st.rerun()
             else:
-                st.error("Credenziali non valide.")
+                st.error("Credenziali errate.")
     st.stop()
 
-# --- SIDEBAR ---
+# --- INTERFACCIA ---
 with st.sidebar:
-    st.title("Opzioni")
-    st.info(f"Connesso: {st.session_state['user']}")
+    st.write(f"Utente: **{st.session_state['user']}**")
     if st.button("Logout"):
-        del st.session_state["user"]
-        st.rerun()
+        del st.session_state["user"]; st.rerun()
 
-# --- INTERFACCIA AMMINISTRATORE ---
+# --- SEZIONE ADMIN ---
 if st.session_state["user"] == "admin":
-    st.title("👨‍💼 Dashboard Amministrativa")
-    
-    t1, t2, t3 = st.tabs(["Registro Richieste", "Saldi Personale", "Strumenti Reset"])
+    st.title("👨‍💼 Pannello di Controllo")
+    t1, t2, t3 = st.tabs(["Registro Richieste", "Saldi Aggiornati", "Manutenzione"])
     
     with t1:
-        st.subheader("Tutte le richieste di assenza")
-        if os.path.exists(FILE_FERIE):
-            df_f = pd.read_csv(FILE_FERIE)
-            if not df_f.empty:
-                filtro_nome = st.selectbox("Filtra per Dipendente", ["Tutti"] + list(df_dip['Nome'].unique()))
-                if filtro_nome != "Tutti":
-                    df_f = df_f[df_f['Nome'] == filtro_nome]
-                
-                st.dataframe(df_f, use_container_width=True)
-                
-                # Funzione per eliminare riga specifica
-                st.divider()
-                st.write("### Elimina una richiesta")
-                riga_da_eliminare = st.number_input("Inserisci l'indice della riga da cancellare", min_value=0, max_value=len(df_f)-1, step=1)
-                if st.button("Elimina selezionata"):
-                    df_f_orig = pd.read_csv(FILE_FERIE)
-                    df_f_orig = df_f_orig.drop(riga_da_eliminare)
-                    df_f_orig.to_csv(FILE_FERIE, index=False)
-                    st.success("Richiesta eliminata!")
-                    time.sleep(1); st.rerun()
-            else:
-                st.info("Nessuna richiesta presente.")
+        df_f = pd.read_csv(FILE_FERIE)
+        if not df_f.empty:
+            st.write("### Storico Assenze")
+            st.dataframe(df_f, use_container_width=True)
+            
+            # ELIMINAZIONE RIGA
+            st.divider()
+            idx = st.number_input("ID riga da eliminare", min_value=0, max_value=len(df_f)-1, step=1)
+            if st.button("Elimina Richiesta"):
+                df_f = df_f.drop(df_f.index[idx])
+                df_f.to_csv(FILE_FERIE, index=False)
+                st.success("Richiesta rimossa."); time.sleep(1); st.rerun()
+        else:
+            st.info("Nessuna richiesta in archivio.")
 
     with t2:
-        st.subheader("Riepilogo ore residue")
+        st.write("### Saldi Residui Real-Time")
         df_f_all = pd.read_csv(FILE_FERIE)
-        df_view = df_dip.copy()
+        df_res = df_dip.copy()
         
-        # Calcolo dinamico per tutti i dipendenti
-        def get_residuo(row, tipo):
-            usato = df_f_all[(df_f_all['Nome'] == row['Nome']) & (df_f_all['Risorsa'] == tipo)]['Ore'].sum()
-            return round(row[tipo] - usato, 2)
+        def calcola_residuo(row, col_tipo):
+            usato = df_f_all[(df_f_all['Nome'] == row['Nome']) & (df_f_all['Risorsa'] == col_tipo)]['Ore'].sum()
+            return round(row[col_tipo] - usato, 2)
         
-        df_view['Ferie Residue'] = df_view.apply(lambda r: get_residuo(r, 'Ferie'), axis=1)
-        df_view['ROL Residui'] = df_view.apply(lambda r: get_residuo(r, 'ROL'), axis=1)
-        st.dataframe(df_view[['Nome', 'Ferie Residue', 'ROL Residui']], use_container_width=True)
+        df_res['Ferie Residue'] = df_res.apply(lambda r: calcola_residuo(r, 'Ferie'), axis=1)
+        df_res['ROL Residui'] = df_res.apply(lambda r: calcola_residuo(r, 'ROL'), axis=1)
+        st.dataframe(df_res[['Nome', 'Ferie Residue', 'ROL Residui']], use_container_width=True)
         
-        # Bottone Export
-        csv = df_view.to_csv(index=False).encode('utf-8')
-        st.download_button("Scarica Report Excel (CSV)", data=csv, file_name="report_hr_battistolli.csv", mime="text/csv")
+        # DOWNLOAD
+        csv = df_res.to_csv(index=False).encode('utf-8')
+        st.download_button("Scarica Report per Ufficio", csv, "report_saldi.csv", "text/csv")
 
     with t3:
-        st.warning("⚠️ Area Pericolosa")
-        if st.button("RESET TOTALE RICHIESTE"):
+        if st.button("RESET TOTALE (Cancella tutte le richieste)"):
             pd.DataFrame(columns=['Nome', 'Inizio', 'Fine', 'Tipo', 'Risorsa', 'Ore', 'Note']).to_csv(FILE_FERIE, index=False)
-            st.rerun()
+            st.warning("Archivio svuotato."); st.rerun()
 
-# --- INTERFACCIA DIPENDENTE ---
+# --- SEZIONE DIPENDENTE ---
 else:
     nome_u = st.session_state["user"]
     dati_u = df_dip[df_dip['Nome'] == nome_u].iloc[0]
@@ -141,39 +126,29 @@ else:
     usato_r = df_f[(df_f['Nome'] == nome_u) & (df_f['Risorsa'] == 'ROL')]['Ore'].sum()
     
     st.header(f"Benvenuto {nome_u}")
-    c1, c2 = st.columns(2)
-    c1.metric("Saldo Ferie", f"{round(dati_u['Ferie'] - usato_f, 2)} h")
-    c2.metric("Saldo ROL", f"{round(dati_u['ROL'] - usato_r, 2)} h")
+    col1, col2 = st.columns(2)
+    col1.metric("Saldo Ferie", f"{round(dati_u['Ferie'] - usato_f, 2)} h")
+    col2.metric("Saldo ROL", f"{round(dati_u['ROL'] - usato_r, 2)} h")
 
-    st.divider()
-
-    with st.form("invio_richiesta"):
-        st.subheader("Nuova Richiesta")
-        col1, col2 = st.columns(2)
-        tipo = col1.selectbox("Tipo", ["Ferie", "ROL", "104", "Donazione Sangue", "Malattia"])
-        risorsa = col2.radio("Scala da:", ["Ferie", "ROL"], horizontal=True)
-        da = st.date_input("Inizio")
-        al = st.date_input("Fine")
-        
-        if st.form_submit_button("INVIA RICHIESTA"):
-            if da > al:
-                st.error("Date non valide.")
-            else:
-                # Logica Blocco 3 persone
-                df_f['Inizio'] = pd.to_datetime(df_f['Inizio']).dt.date
-                df_f['Fine'] = pd.to_datetime(df_f['Fine']).dt.date
-                conflitto = False
-                for g in pd.date_range(da, al).date:
-                    count = len(df_f[(df_f['Inizio'] <= g) & (df_f['Fine'] >= g)])
-                    if count >= 3 and tipo not in ["104", "Donazione Sangue"]:
-                        conflitto = True
-                        st.error(f"Spiacenti, il giorno {g} ci sono già 3 persone assenti.")
-                        break
-                
-                if not conflitto:
-                    gg = int(np.busday_count(da, al + timedelta(days=1)))
-                    ore = round(gg * ORE_GIORNATA, 2)
-                    nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[da],'Fine':[al],'Tipo':[tipo],'Risorsa':[risorsa],'Ore':[ore],'Note':[""]})
-                    nuova.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                    st.success("Richiesta registrata con successo!")
-                    time.sleep(1); st.rerun()
+    with st.form("richiesta"):
+        st.subheader("Invia Richiesta")
+        tipo = st.selectbox("Motivo", ["Ferie", "ROL", "104", "Donazione Sangue", "Malattia"])
+        risorsa = st.radio("Scala da:", ["Ferie", "ROL"], horizontal=True)
+        inizio = st.date_input("Dalla data")
+        fine = st.date_input("Alla data")
+        if st.form_submit_button("CONFERMA"):
+            # Logica blocco 3 persone
+            giorni = pd.date_range(inizio, fine).date
+            conflitto = False
+            df_f['Inizio'] = pd.to_datetime(df_f['Inizio']).dt.date
+            df_f['Fine'] = pd.to_datetime(df_f['Fine']).dt.date
+            for g in giorni:
+                count = len(df_f[(df_f['Inizio'] <= g) & (df_f['Fine'] >= g)])
+                if count >= 3 and tipo not in ["104", "Donazione Sangue"]:
+                    conflitto = True; st.error(f"Limite raggiunto il {g}"); break
+            
+            if not conflitto:
+                ore = round(int(np.busday_count(inizio, fine + timedelta(days=1))) * ORE_GIORNATA, 2)
+                nuova = pd.DataFrame({'Nome':[nome_u],'Inizio':[inizio],'Fine':[fine],'Tipo':[tipo],'Risorsa':[risorsa],'Ore':[ore],'Note':[""]})
+                nuova.to_csv(FILE_FERIE, mode='a', header=False, index=False)
+                st.success("Inviata!"); time.sleep(1); st.rerun()
