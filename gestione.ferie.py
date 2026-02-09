@@ -39,7 +39,7 @@ def invia_email(oggetto, corpo):
 # --- DATABASE ---
 def refresh_db():
     elenco_reale = [
-        ["ROSSINI LORENZO", 6.40, 0.0, "Guardia", "12345", True], # Nome, Ferie, ROL, Tipo, PW, PrimoAccesso
+        ["ROSSINI LORENZO", 6.40, 0.0, "Guardia", "12345", True],
         ["ABBATICCHIO ANTONIO", 10.0, 8.0, "Fiduciario", "12345", True],
         ["ACQUAVIVA ANNALISA", 10.0, 8.0, "Fiduciario", "12345", True]
     ]
@@ -61,7 +61,6 @@ if "user" not in st.session_state:
     if st.button("ACCEDI"):
         if u_in == "ADMIN" and p_in == PASSWORD_ADMIN:
             st.session_state["user"] = "admin"; st.rerun()
-        
         for i, row in df_dip.iterrows():
             if u_in == row['Nome'] or u_in == " ".join(row['Nome'].split()[::-1]):
                 if str(row['Password']) == p_in:
@@ -73,85 +72,84 @@ if "user" not in st.session_state:
 
 user = st.session_state["user"]
 
-# --- GESTIONE CAMBIO PASSWORD PRIMO ACCESSO ---
+# --- GESTIONE CAMBIO PASSWORD ---
 if user != "admin" and st.session_state.get("primo_accesso", False):
     st.warning(f"Benvenuto {user}. È necessario cambiare la password al primo accesso.")
-    new_pw = st.text_input("Nuova Password", type="password")
-    conf_pw = st.text_input("Conferma Nuova Password", type="password")
-    if st.button("Aggiorna Password"):
-        if new_pw == conf_pw and len(new_pw) >= 5:
-            df_dip.loc[df_dip['Nome'] == user, 'Password'] = new_pw
-            df_dip.loc[df_dip['Nome'] == user, 'PrimoAccesso'] = False
-            df_dip.to_csv(FILE_DIPENDENTI, index=False)
-            st.session_state["primo_accesso"] = False
-            st.success("Password aggiornata! Caricamento app...")
-            time.sleep(1.5); st.rerun()
-        else: st.error("Le password non coincidono o sono troppo corte.")
+    with st.container():
+        new_pw = st.text_input("Nuova Password (min 5 caratteri)", type="password")
+        conf_pw = st.text_input("Conferma Nuova Password", type="password")
+        if st.button("Aggiorna Password"):
+            if new_pw == conf_pw and len(new_pw) >= 5:
+                df_dip.loc[df_dip['Nome'] == user, 'Password'] = new_pw
+                df_dip.loc[df_dip['Nome'] == user, 'PrimoAccesso'] = False
+                df_dip.to_csv(FILE_DIPENDENTI, index=False)
+                st.session_state["primo_accesso"] = False
+                st.success("Password aggiornata! Entro nell'app...")
+                time.sleep(1.5); st.rerun()
+            else: st.error("Errore password.")
     st.stop()
 
 # --- AREA ADMIN ---
 if user == "admin":
-    st.header("👨‍💼 Console Admin")
-    if st.button("Logout"): del st.session_state["user"]; st.rerun()
-    st.dataframe(df_ferie, use_container_width=True)
+    st.header("👨‍💼 Console Admin - Gestione O.D.S.")
+    
+    col_adm1, col_adm2 = st.columns([3, 1])
+    
+    with col_adm2:
+        if st.button("Logout"): del st.session_state["user"]; st.rerun()
+        st.divider()
+        st.subheader("Esporta Dati")
+        # Tasto Download per il registro ferie
+        csv_ferie = df_ferie.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 SCARICA REGISTRO FERIE", data=csv_ferie, file_name=f"registro_ferie_{date.today()}.csv", mime='text/csv')
+        
+        # Tasto Download per la lista dipendenti (con le nuove password)
+        csv_dip = df_dip.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 SCARICA LISTA DIPENDENTI", data=csv_dip, file_name="anagrafica_aggiornata.csv", mime='text/csv')
+
+    with col_adm1:
+        st.subheader("Tabella Richieste Attive")
+        st.dataframe(df_ferie, use_container_width=True)
 
 # --- AREA UTENTE ---
 else:
     info = df_dip[df_dip['Nome'] == user].iloc[0]
-    
-    # LOGICA 1: Saldo sempre a GIORNI per tutti (Fiduciari inclusi)
     u_f = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
     u_r = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
-    u_d = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Donazione Sangue')]['Valore'].sum()
     
     st.header(f"Ciao {user}")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Saldo Ferie (Giorni)", round(float(info['Ferie']) - u_f, 2))
-    
-    # LOGICA 2: Le guardie non hanno ROL (visualizza 0 o N/A)
-    if info['Contratto'] == "Guardia":
-        c2.metric("ROL (Giorni)", "N/A")
-    else:
-        c2.metric("ROL (Giorni)", round(float(info['ROL']) - u_r, 2))
-    
-    if c4.button("Logout"): del st.session_state["user"]; st.rerun()
+    c1.metric("Saldo Ferie (GG)", round(float(info['Ferie']) - u_f, 2))
+    if info['Contratto'] == "Guardia": c2.metric("ROL (GG)", "N/A")
+    else: c2.metric("ROL (GG)", round(float(info['ROL']) - u_r, 2))
+    if c4.button("Esci"): del st.session_state["user"]; st.rerun()
 
     st.divider()
-    
-    # LOGICA 3: Visualizzazione Orizzontale Posti
-    st.subheader("📅 Disponibilità Reparto (Semaforo)")
-    giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
-    cols = st.columns(len(giorni))
-    for i, g in enumerate(giorni):
+    st.subheader("📅 Disponibilità (Max 3)")
+    g_range = pd.date_range(date.today() + timedelta(days=1), periods=10).date
+    cols = st.columns(len(g_range))
+    for i, g in enumerate(g_range):
         occ = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)]) if not df_ferie.empty else 0
         with cols[i]:
-            st.markdown(f"**{g.strftime('%d/%m')}**")
-            st.write("🟢" if occ < LIMITE_CONTEMPORANEITA else "🔴")
+            st.write(f"**{g.strftime('%d/%m')}**")
+            st.write("🟢" if occ < 3 else "🔴")
             st.caption(f"{occ}/3")
 
-    st.divider()
-
-    with st.form("richiesta"):
-        # LOGICA 4: Nuove opzioni (104, Donazione, Congedo)
-        causale = st.selectbox("Causale", ["Ferie", "ROL", "Permesso 104", "Donazione Sangue", "Congedo Parentale"])
+    with st.form("invio"):
+        caus = st.selectbox("Causale", ["Ferie", "ROL", "Permesso 104", "Donazione Sangue", "Congedo Parentale"])
         da = st.date_input("Inizio", min_value=date.today()+timedelta(days=1))
         al = st.date_input("Fine", min_value=date.today()+timedelta(days=1))
-        
         if st.form_submit_button("INVIA"):
             intervallo = pd.date_range(da, al).date
+            if caus in ["Permesso 104", "Congedo Parentale"]: conflitto = False
+            else:
+                conflitto = any(len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale"]))]) >= 3 for d in intervallo)
             
-            # LOGICA ECCEZIONI: 104 e Congedo non bloccano il limite dei 3
-            if causale in ["Permesso 104", "Congedo Parentale"]:
-                conflitto = False
+            if conflitto: st.error("Limite raggiunto!")
             else:
-                conflitto = any(len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale"]))]) >= LIMITE_CONTEMPORANEITA for d in intervallo)
-
-            if conflitto:
-                st.error("Limite di contemporaneità raggiunto per le date scelte.")
-            else:
-                val = len(intervallo) # Saldo calcolato a GIORNI
-                nuovo = pd.DataFrame([[user, str(da), str(al), causale, causale, val, "Giorni"]], columns=df_ferie.columns)
+                val = len(intervallo)
+                nuovo = pd.DataFrame([[user, str(da), str(al), caus, caus, val, "Giorni"]], columns=df_ferie.columns)
                 nuovo.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                invia_email(f"Richiesta {causale} - {user}", f"{user} chiede {causale} dal {da} al {al}")
-                st.success("Richiesta registrata!")
+                invia_email(f"Richiesta {caus} - {user}", f"{user}: {caus} dal {da} al {al}")
+                st.success("Inviato!")
                 time.sleep(1); st.rerun()
