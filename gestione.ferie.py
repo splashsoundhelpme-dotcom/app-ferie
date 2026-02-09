@@ -6,184 +6,152 @@ import smtplib
 from email.mime.text import MIMEText
 import time
 
-# --- CONFIGURAZIONE COSTANTI ---
+# --- CONFIGURAZIONE ---
 FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
 PASSWORD_ADMIN = "admin2024"
 LIMITE_CONTEMPORANEITA = 3 
 ORE_GIORNATA_FIDUCIARI = 6.67
 
-# --- 1. FUNZIONI DI SUPPORTO ---
+# --- FUNZIONI ---
 def formatta_data_it(data_obj):
-    """Converte qualsiasi formato data in GG/MM/AAAA per la visualizzazione"""
     if isinstance(data_obj, str):
-        try:
-            data_obj = datetime.strptime(data_obj, '%Y-%m-%d')
-        except:
-            return data_obj
+        try: data_obj = datetime.strptime(data_obj, '%Y-%m-%d')
+        except: return data_obj
     return data_obj.strftime('%d/%m/%Y')
 
 def invia_email(oggetto, corpo):
-    """Sistema di notifica e-mail tramite Secrets"""
     try:
-        if "email" not in st.secrets:
-            return False
+        if "email" not in st.secrets: return False
         mittente = st.secrets["email"]["user"]
-        password = st.secrets["email"]["password"]
-        destinatario = st.secrets["email"]["admin_email"]
-        
+        pw = st.secrets["email"]["password"]
+        dest = st.secrets["email"]["admin_email"]
         msg = MIMEText(corpo)
         msg['Subject'] = oggetto
         msg['From'] = mittente
-        msg['To'] = destinatario
-        
+        msg['To'] = dest
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(mittente, password)
-            server.sendmail(mittente, destinatario, msg.as_string())
+            server.login(mittente, pw)
+            server.sendmail(mittente, dest, msg.as_string())
         return True
-    except:
-        return False
+    except: return False
 
-# --- 2. GESTIONE DATABASE (INIZIALIZZAZIONE) ---
-def carica_database():
-    # Qui aggiungeremo i tuoi 45 dipendenti. Per ora ho messo i primi per test.
-    elenco_base = [
-        ["ROSSINI LORENZO", 6.40, 12.0, "Guardia", "12345"],
-        ["ABBATICCHIO ANTONIO", 10.0, 8.0, "Fiduciario", "12345"],
-        ["ACQUAVIVA ANNALISA", 10.0, 8.0, "Fiduciario", "12345"],
-        ["ANTONACCI MARIO", 15.0, 10.0, "Guardia", "12345"],
-        ["DI RELLA COSIMO DAMIANO", 12.0, 5.0, "Guardia", "12345"],
-        ["FAVIA ANTONIO", 8.0, 4.0, "Guardia", "12345"]
+# --- DATABASE ---
+def refresh_db():
+    elenco_reale = [
+        ["ROSSINI LORENZO", 6.40, 0.0, "Guardia", "12345", True], # Nome, Ferie, ROL, Tipo, PW, PrimoAccesso
+        ["ABBATICCHIO ANTONIO", 10.0, 8.0, "Fiduciario", "12345", True],
+        ["ACQUAVIVA ANNALISA", 10.0, 8.0, "Fiduciario", "12345", True]
     ]
-    
     if not os.path.exists(FILE_DIPENDENTI):
-        pd.DataFrame(elenco_base, columns=['Nome','Ferie','ROL','Contratto','Password']).to_csv(FILE_DIPENDENTI, index=False)
-    
+        pd.DataFrame(elenco_reale, columns=['Nome','Ferie','ROL','Contratto','Password', 'PrimoAccesso']).to_csv(FILE_DIPENDENTI, index=False)
     if not os.path.exists(FILE_FERIE):
         pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita']).to_csv(FILE_FERIE, index=False)
-    
     return pd.read_csv(FILE_DIPENDENTI), pd.read_csv(FILE_FERIE)
 
-df_dip, df_ferie = carica_database()
+df_dip, df_ferie = refresh_db()
 
-# --- 3. INTERFACCIA STREAMLIT ---
-st.set_page_config(page_title="Battistolli HR Management", layout="wide")
+st.set_page_config(page_title="Battistolli HR", layout="wide")
 
-# LOGIN SYSTEM
+# --- LOGIN ---
 if "user" not in st.session_state:
-    st.title("🏢 Portale Battistolli - Gestione Assenze")
-    nome_input = st.text_input("NOME E COGNOME (es. ROSSINI LORENZO)").strip().upper()
-    pass_input = st.text_input("PASSWORD", type="password").strip()
-    
+    st.title("🏢 Accesso Portale Battistolli")
+    u_in = st.text_input("NOME E COGNOME").strip().upper()
+    p_in = st.text_input("PASSWORD", type="password").strip()
     if st.button("ACCEDI"):
-        if nome_input == "ADMIN" and pass_input == PASSWORD_ADMIN:
-            st.session_state["user"] = "admin"
-            st.rerun()
-            
-        trovato = False
-        for n_db in df_dip['Nome'].values:
-            n_rev = " ".join(n_db.split()[::-1])
-            if nome_input == n_db or nome_input == n_rev:
-                if str(df_dip[df_dip['Nome'] == n_db].iloc[0]['Password']) == pass_input:
-                    st.session_state["user"] = n_db
-                    trovato = True
-                    break
-        if trovato: 
-            st.rerun()
-        else: 
-            st.error("Credenziali non valide. Verifica Nome o Password.")
+        if u_in == "ADMIN" and p_in == PASSWORD_ADMIN:
+            st.session_state["user"] = "admin"; st.rerun()
+        
+        for i, row in df_dip.iterrows():
+            if u_in == row['Nome'] or u_in == " ".join(row['Nome'].split()[::-1]):
+                if str(row['Password']) == p_in:
+                    st.session_state["user"] = row['Nome']
+                    st.session_state["primo_accesso"] = row['PrimoAccesso']
+                    st.rerun()
+        st.error("Credenziali errate.")
     st.stop()
 
-user_attuale = st.session_state["user"]
+user = st.session_state["user"]
 
-# --- 4. AREA AMMINISTRATORE (O.D.S.) ---
-if user_attuale == "admin":
-    st.header("👨‍💼 Console di Comando Admin")
-    
-    c_admin_1, c_admin_2 = st.columns([3, 1])
-    
-    with c_admin_2:
-        if st.button("Logout"):
-            del st.session_state["user"]; st.rerun()
-        st.divider()
-        if st.button("🗑️ RESET TUTTE LE FERIE"):
-            pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita']).to_csv(FILE_FERIE, index=False)
-            st.warning("Archivio svuotato!")
-            time.sleep(1); st.rerun()
+# --- GESTIONE CAMBIO PASSWORD PRIMO ACCESSO ---
+if user != "admin" and st.session_state.get("primo_accesso", False):
+    st.warning(f"Benvenuto {user}. È necessario cambiare la password al primo accesso.")
+    new_pw = st.text_input("Nuova Password", type="password")
+    conf_pw = st.text_input("Conferma Nuova Password", type="password")
+    if st.button("Aggiorna Password"):
+        if new_pw == conf_pw and len(new_pw) >= 5:
+            df_dip.loc[df_dip['Nome'] == user, 'Password'] = new_pw
+            df_dip.loc[df_dip['Nome'] == user, 'PrimoAccesso'] = False
+            df_dip.to_csv(FILE_DIPENDENTI, index=False)
+            st.session_state["primo_accesso"] = False
+            st.success("Password aggiornata! Caricamento app...")
+            time.sleep(1.5); st.rerun()
+        else: st.error("Le password non coincidono o sono troppo corte.")
+    st.stop()
 
-    with c_admin_1:
-        st.subheader("📋 Registro Prenotazioni per O.D.S.")
-        if not df_ferie.empty:
-            df_admin_view = df_ferie.copy()
-            df_admin_view['Inizio'] = df_admin_view['Inizio'].apply(formatta_data_it)
-            df_admin_view['Fine'] = df_admin_view['Fine'].apply(formatta_data_it)
-            st.dataframe(df_admin_view, use_container_width=True)
-        else:
-            st.info("Nessuna prenotazione attiva.")
+# --- AREA ADMIN ---
+if user == "admin":
+    st.header("👨‍💼 Console Admin")
+    if st.button("Logout"): del st.session_state["user"]; st.rerun()
+    st.dataframe(df_ferie, use_container_width=True)
 
-# --- 5. AREA DIPENDENTE ---
+# --- AREA UTENTE ---
 else:
-    dati_u = df_dip[df_dip['Nome'] == user_attuale].iloc[0]
-    u_misura = "Giorni" if dati_u['Contratto'] == "Guardia" else "Ore"
+    info = df_dip[df_dip['Nome'] == user].iloc[0]
     
-    st.header(f"Benvenuto, {user_attuale}")
+    # LOGICA 1: Saldo sempre a GIORNI per tutti (Fiduciari inclusi)
+    u_f = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
+    u_r = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
+    u_d = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Donazione Sangue')]['Valore'].sum()
     
-    # Calcolo Saldi Sottraendo le prenotazioni esistenti
-    u_f = df_ferie[(df_ferie['Nome'] == user_attuale) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
-    u_r = df_ferie[(df_ferie['Nome'] == user_attuale) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
+    st.header(f"Ciao {user}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Saldo Ferie (Giorni)", round(float(info['Ferie']) - u_f, 2))
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric(f"Saldo Ferie ({u_misura})", round(float(dati_u['Ferie']) - u_f, 2))
-    m2.metric(f"Saldo ROL ({u_misura})", round(float(dati_u['ROL']) - u_r, 2))
-    if m3.button("Logout"):
-        del st.session_state["user"]; st.rerun()
+    # LOGICA 2: Le guardie non hanno ROL (visualizza 0 o N/A)
+    if info['Contratto'] == "Guardia":
+        c2.metric("ROL (Giorni)", "N/A")
+    else:
+        c2.metric("ROL (Giorni)", round(float(info['ROL']) - u_r, 2))
+    
+    if c4.button("Logout"): del st.session_state["user"]; st.rerun()
 
     st.divider()
     
-    # Calendario Privacy per i dipendenti
-    st.subheader("📅 Verifica Posti Disponibili")
-    prossimi_giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
-    col_cal = st.columns(len(prossimi_giorni))
-    
-    for i, giorno_c in enumerate(prossimi_giorni):
-        occupati = 0
-        if not df_ferie.empty:
-            occupati = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= giorno_c) & (pd.to_datetime(df_ferie['Fine']).dt.date >= giorno_c)])
-        
-        colore = "🟢" if occupati < LIMITE_CONTEMPORANEITA else "🔴"
-        col_cal[i].markdown(f"**{giorno_c.strftime('%d/%m')}**\n\n{colore}\n\n{occupati}/{LIMITE_CONTEMPORANEITA}")
+    # LOGICA 3: Visualizzazione Orizzontale Posti
+    st.subheader("📅 Disponibilità Reparto (Semaforo)")
+    giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
+    cols = st.columns(len(giorni))
+    for i, g in enumerate(giorni):
+        occ = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)]) if not df_ferie.empty else 0
+        with cols[i]:
+            st.markdown(f"**{g.strftime('%d/%m')}**")
+            st.write("🟢" if occ < LIMITE_CONTEMPORANEITA else "🔴")
+            st.caption(f"{occ}/3")
 
     st.divider()
 
-    # Form Richiesta
-    with st.form("form_richiesta_v30"):
-        st.subheader("📝 Nuova Richiesta")
-        tipo_assenza = st.selectbox("Causale", ["Ferie", "ROL"])
-        domani = date.today() + timedelta(days=1)
-        data_inizio = st.date_input("Data Inizio", value=domani, min_value=domani)
-        data_fine = st.date_input("Data Fine", value=domani, min_value=domani)
+    with st.form("richiesta"):
+        # LOGICA 4: Nuove opzioni (104, Donazione, Congedo)
+        causale = st.selectbox("Causale", ["Ferie", "ROL", "Permesso 104", "Donazione Sangue", "Congedo Parentale"])
+        da = st.date_input("Inizio", min_value=date.today()+timedelta(days=1))
+        al = st.date_input("Fine", min_value=date.today()+timedelta(days=1))
         
-        if st.form_submit_button("INVIA RICHIESTA"):
-            riferimento_date = pd.date_range(data_inizio, data_fine).date
-            blocco_posto = False
-            for d_singola in riferimento_date:
-                if not df_ferie.empty:
-                    n_occupati = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d_singola) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d_singola)])
-                    if n_occupati >= LIMITE_CONTEMPORANEITA:
-                        blocco_posto = True; break
+        if st.form_submit_button("INVIA"):
+            intervallo = pd.date_range(da, al).date
             
-            if blocco_posto:
-                st.error("Spiacenti, per le date scelte non ci sono posti disponibili (Max 3).")
+            # LOGICA ECCEZIONI: 104 e Congedo non bloccano il limite dei 3
+            if causale in ["Permesso 104", "Congedo Parentale"]:
+                conflitto = False
             else:
-                quantita = len(riferimento_date) if dati_u['Contratto'] == "Guardia" else round(len(riferimento_date)*ORE_GIORNATA_FIDUCIARI, 2)
-                nuova_prenotazione = pd.DataFrame([[user_attuale, str(data_inizio), str(data_fine), tipo_assenza, tipo_assenza, quantita, u_misura]], columns=df_ferie.columns)
-                nuova_prenotazione.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                
-                # Formato Italiano per la Mail
-                inizio_it = formatta_data_it(data_inizio)
-                fine_it = formatta_data_it(data_fine)
-                corpo_mail = f"Nuova richiesta da: {user_attuale}\nTipo: {tipo_assenza}\nDal: {inizio_it}\nAl: {fine_it}\nValore: {quantita} {u_misura}"
-                inviata = invia_email(f"Richiesta {tipo_assenza} - {user_attuale}", corpo_mail)
-                
-                st.success(f"Richiesta registrata per il periodo {inizio_it} - {fine_it}!")
-                time.sleep(1.5); st.rerun()
+                conflitto = any(len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale"]))]) >= LIMITE_CONTEMPORANEITA for d in intervallo)
+
+            if conflitto:
+                st.error("Limite di contemporaneità raggiunto per le date scelte.")
+            else:
+                val = len(intervallo) # Saldo calcolato a GIORNI
+                nuovo = pd.DataFrame([[user, str(da), str(al), causale, causale, val, "Giorni"]], columns=df_ferie.columns)
+                nuovo.to_csv(FILE_FERIE, mode='a', header=False, index=False)
+                invia_email(f"Richiesta {causale} - {user}", f"{user} chiede {causale} dal {da} al {al}")
+                st.success("Richiesta registrata!")
+                time.sleep(1); st.rerun()
