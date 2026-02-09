@@ -11,7 +11,6 @@ FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
 PASSWORD_ADMIN = "admin2024"
 LIMITE_CONTEMPORANEITA = 3 
-# Valori temporanei (domani inseriremo quelli precisi che mi darai)
 MATURAZIONE_FERIE_JAN = 1.83 
 MATURAZIONE_ROL_JAN_GG = 0.90 
 
@@ -82,7 +81,7 @@ def inizializza_database():
     return pd.read_csv(FILE_DIPENDENTI), pd.read_csv(FILE_FERIE)
 
 df_dip, df_ferie = inizializza_database()
-st.set_page_config(page_title="Battistolli HR v34.0", layout="wide")
+st.set_page_config(page_title="Battistolli HR v35.0", layout="wide")
 
 # --- 4. LOGIN ---
 if "user" not in st.session_state:
@@ -118,18 +117,38 @@ if user != "admin" and st.session_state.get("primo_accesso", True):
 # --- 6. AREA ADMIN ---
 if user == "admin":
     st.header("👨‍💼 Pannello Direzione O.D.S.")
-    if st.button("Logout"): del st.session_state["user"]; st.rerun()
-    st.subheader("Riepilogo Tutte le Richieste")
-    st.dataframe(df_ferie, use_container_width=True)
-    st.download_button("📥 Scarica Registro CSV", df_ferie.to_csv(index=False), "registro_completo.csv")
+    tab_richieste, tab_anagrafica = st.tabs(["Richieste Ferie", "Gestione Dipendenti"])
+
+    with tab_richieste:
+        if st.button("Logout", key="logout_admin"): del st.session_state["user"]; st.rerun()
+        st.dataframe(df_ferie, use_container_width=True)
+        st.download_button("📥 Scarica Registro CSV", df_ferie.to_csv(index=False), "registro_ferie.csv")
+
+    with tab_anagrafica:
+        st.subheader("Aggiungi Nuovo Operatore")
+        with st.form("nuovo_dipendente"):
+            n_nome = st.text_input("Cognome e Nome").strip().upper()
+            n_contratto = st.selectbox("Tipo Contratto", ["Fiduciario", "Guardia"])
+            n_ferie = st.number_input("Saldo Ferie Iniziale (GG)", value=0.0)
+            n_rol = st.number_input("Saldo ROL Iniziale (GG)", value=0.0)
+            if st.form_submit_button("AGGIUNGI UTENTE"):
+                if n_nome and n_nome not in df_dip['Nome'].values:
+                    nuovo_r = pd.DataFrame([[n_nome, n_ferie, (n_rol if n_contratto=="Fiduciario" else 0), n_contratto, "12345", True]], columns=df_dip.columns)
+                    df_dip = pd.concat([df_dip, nuovo_r], ignore_index=True)
+                    df_dip.to_csv(FILE_DIPENDENTI, index=False)
+                    st.success(f"Utente {n_nome} aggiunto con successo!")
+                    time.sleep(1); st.rerun()
+                else: st.error("Nome non valido o già esistente.")
+        
+        st.divider()
+        st.subheader("Lista Operatori Attuali")
+        st.dataframe(df_dip[['Nome', 'Contratto', 'Ferie', 'ROL']], use_container_width=True)
 
 # --- 7. AREA UTENTE ---
 else:
     info = df_dip[df_dip['Nome'] == user].iloc[0]
     mat_f = info['Ferie'] + MATURAZIONE_FERIE_JAN
     mat_r = info['ROL'] + (MATURAZIONE_ROL_JAN_GG if info['Contratto'] == "Fiduciario" else 0)
-    
-    # Calcolo saldi sottraendo solo le richieste non annullate
     usato_f = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
     usato_r = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
     
@@ -140,31 +159,20 @@ else:
     if c3.button("Esci"): del st.session_state["user"]; st.rerun()
 
     st.divider()
-    
-    # --- SEZIONE ANNULLAMENTO RICHIESTE ---
-    st.subheader("📋 Le tue richieste attive")
+    st.subheader("📋 Le tue richieste")
     mie_richieste = df_ferie[df_ferie['Nome'] == user]
-    if mie_richieste.empty:
-        st.info("Non hai richieste attive.")
-    else:
+    if not mie_richieste.empty:
         for i, row in mie_richieste.iterrows():
             col_info, col_btn = st.columns([4, 1])
-            with col_info:
-                st.write(f"**{row['Tipo']}** dal {row['Inizio']} al {row['Fine']} ({row['Valore']} GG)")
+            with col_info: st.write(f"**{row['Tipo']}** dal {row['Inizio']} al {row['Fine']}")
             with col_btn:
-                if st.button(f"Annulla", key=f"del_{i}"):
-                    # Rimuovi la riga dal dataframe
+                if st.button("Annulla", key=f"del_{i}"):
                     df_ferie = df_ferie.drop(i)
                     df_ferie.to_csv(FILE_FERIE, index=False)
-                    # Invia notifica di annullamento
-                    invia_email(f"RICHIESTA ANNULLATA: {user}", f"L'operatore {user} ha ANNULLATO la richiesta di {row['Tipo']} dal {row['Inizio']} al {row['Fine']}")
-                    st.warning("Richiesta annullata.")
-                    time.sleep(1)
+                    invia_email(f"RICHIESTA ANNULLATA: {user}", f"{user} ha annullato {row['Tipo']} dal {row['Inizio']} al {row['Fine']}")
                     st.rerun()
 
     st.divider()
-    
-    # Calendario disponibilità
     st.subheader("📅 Disponibilità Reparto")
     giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
     cols = st.columns(len(giorni))
@@ -175,15 +183,13 @@ else:
             st.write("🟢" if occ < 3 else "🔴")
             st.caption(f"{occ}/3")
 
-    # Form invio
     with st.form("richiesta"):
-        st.subheader("Invia Nuova Richiesta")
+        st.subheader("Nuova Richiesta")
         opz = ["Ferie", "Permesso 104", "Donazione Sangue", "Congedo Parentale"]
         if info['Contratto'] == "Fiduciario": opz.insert(1, "ROL")
         causale = st.selectbox("Tipo", opz)
-        da = st.date_input("Dal", min_value=date.today()+timedelta(days=1))
-        al = st.date_input("Al", min_value=date.today()+timedelta(days=1))
-        
+        da = st.date_input("Inizio", min_value=date.today()+timedelta(days=1))
+        al = st.date_input("Fine", min_value=date.today()+timedelta(days=1))
         if st.form_submit_button("INVIA"):
             gg = pd.date_range(da, al).date
             blocco = False
@@ -191,9 +197,10 @@ else:
                 for d in gg:
                     if len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale"]))]) >= 3:
                         blocco = True; break
-            if blocco: st.error("Posti esauriti per quelle date.")
+            if blocco: st.error("Limite raggiunto.")
             else:
                 new = pd.DataFrame([[user, str(da), str(al), causale, causale, len(gg), "GG"]], columns=df_ferie.columns)
                 new.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                invia_email(f"Nuova Richiesta {causale}", f"L'operatore {user} chiede {causale} dal {da} al {al}")
+                invia_email(f"Richiesta {causale}", f"{user} chiede {causale} dal {da} al {al}")
                 st.success("Inviata!"); time.sleep(1); st.rerun()
+                
