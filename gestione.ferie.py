@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pd
 import os
 from datetime import datetime, date, timedelta
 import smtplib
@@ -19,18 +19,15 @@ def invia_email(oggetto, corpo):
         mittente = st.secrets["email"]["user"]
         password = st.secrets["email"]["password"]
         destinatario = st.secrets["email"]["admin_email"]
-
         msg = MIMEText(corpo)
         msg['Subject'] = oggetto
         msg['From'] = mittente
         msg['To'] = destinatario
-
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(mittente, password)
             server.sendmail(mittente, destinatario, msg.as_string())
         return True
-    except Exception as e:
-        print(f"Errore email: {e}")
+    except:
         return False
 
 # --- 2. GESTIONE DATABASE ---
@@ -51,9 +48,9 @@ def refresh_database():
 
 df_dip, df_ferie = refresh_database()
 
-# --- 3. INTERFACCIA STREAMLIT ---
-st.set_page_config(page_title="Battistolli HR v26.0", layout="wide")
+st.set_page_config(page_title="Battistolli HR v26.1", layout="wide")
 
+# --- LOGIN ---
 if "user" not in st.session_state:
     st.title("🏢 Accesso Portale Battistolli")
     u_in = st.text_input("NOME").strip().upper()
@@ -72,10 +69,26 @@ user = st.session_state["user"]
 
 # --- AREA ADMIN ---
 if user == "admin":
-    st.header("👨‍💼 Console Amministratore (O.D.S.)")
-    st.subheader("Riepilogo Richieste")
-    st.dataframe(df_ferie, use_container_width=True)
-    if st.button("LOGOUT"): del st.session_state["user"]; st.rerun()
+    st.header("👨‍💼 Console Amministratore")
+    
+    col_a, col_b = st.columns([3, 1])
+    with col_b:
+        if st.button("🚪 LOGOUT"): 
+            del st.session_state["user"]; st.rerun()
+        
+        st.write("---")
+        st.warning("⚠️ ZONA PERICOLO")
+        if st.button("🗑️ RESET RICHIESTE", help="Cancella tutte le ferie prenotate"):
+            pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita']).to_csv(FILE_FERIE, index=False)
+            st.success("Registro svuotato!")
+            time.sleep(1); st.rerun()
+
+    with col_a:
+        st.subheader("📋 Registro O.D.S. Settimanale")
+        if not df_ferie.empty:
+            st.dataframe(df_ferie, use_container_width=True)
+        else:
+            st.info("Nessuna richiesta in archivio.")
 
 # --- AREA UTENTE ---
 else:
@@ -84,55 +97,49 @@ else:
     
     st.header(f"Benvenuto {user}")
     
-    # Calcolo Saldi Attuali
+    # Saldi aggiornati
     usato_f = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
     usato_r = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
     
     c1, c2, c3 = st.columns(3)
-    c1.metric(f"Saldo Ferie ({unita})", round(dati['Ferie'] - usato_f, 2))
-    c2.metric(f"Saldo ROL ({unita})", round(dati['ROL'] - usato_r, 2))
+    c1.metric(f"Ferie ({unita})", round(dati['Ferie'] - usato_f, 2))
+    c2.metric(f"ROL ({unita})", round(dati['ROL'] - usato_r, 2))
     if c3.button("Logout"): del st.session_state["user"]; st.rerun()
 
     st.divider()
     
-    # Visualizzazione Privacy: Quanti posti occupati ci sono?
-    st.subheader("📅 Disponibilità Prossimi Giorni")
-    giorni_monitor = pd.date_range(date.today() + timedelta(days=1), periods=7).date
-    cols = st.columns(len(giorni_monitor))
-    for i, g in enumerate(giorni_monitor):
-        occupati = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)])
-        col_color = "🟢" if occupati < LIMITE_CONTEMPORANEITA else "🔴"
-        cols[i].markdown(f"**{g.strftime('%d/%m')}**\n\n{col_color}\n\n{occupati}/{LIMITE_CONTEMPORANEITA}")
+    # Calendario Privacy
+    st.subheader("📅 Disponibilità")
+    giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
+    cols = st.columns(len(giorni))
+    for i, g in enumerate(giorni):
+        occ = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)])
+        col_color = "🟢" if occ < LIMITE_CONTEMPORANEITA else "🔴"
+        cols[i].markdown(f"**{g.strftime('%d/%m')}**\n\n{col_color}\n\n{occ}/{LIMITE_CONTEMPORANEITA}")
 
     st.divider()
 
-    with st.form("richiesta_finale"):
-        st.subheader("📝 Nuova Richiesta")
-        tipo_scelta = st.selectbox("Cosa vuoi richiedere?", ["Ferie", "ROL"])
+    with st.form("invio"):
+        tipo = st.selectbox("Tipo", ["Ferie", "ROL"])
         domani = date.today() + timedelta(days=1)
         da = st.date_input("Inizio", value=domani, min_value=domani)
         al = st.date_input("Fine", value=domani, min_value=domani)
         
-        if st.form_submit_button("Invia Richiesta"):
+        if st.form_submit_button("Invia"):
             intervallo = pd.date_range(da, al).date
             conflitto = False
             for g in intervallo:
-                cont = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)])
-                if cont >= LIMITE_CONTEMPORANEITA:
+                if len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)]) >= LIMITE_CONTEMPORANEITA:
                     conflitto = True; break
             
             if conflitto:
-                st.error("❌ Richiesta negata: Limite di 3 persone raggiunto in una delle date.")
+                st.error("Giorno occupato!")
             else:
-                valore = len(intervallo) if dati['Contratto'] == "Guardia" else round(len(intervallo) * ORE_GIORNATA_FIDUCIARI, 2)
-                nuova = pd.DataFrame([[user, str(da), str(al), tipo_scelta, tipo_scelta, valore, unita]], 
-                                    columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita'])
+                val = len(intervallo) if dati['Contratto'] == "Guardia" else round(len(intervallo)*6.67, 2)
+                nuova = pd.DataFrame([[user, str(da), str(al), tipo, tipo, val, unita]], columns=df_ferie.columns)
                 nuova.to_csv(FILE_FERIE, mode='a', header=False, index=False)
                 
-                # INVIO EMAIL
-                corpo = f"Richiesta da {user}\nTipo: {tipo_scelta}\nPeriodo: {da} - {al}\nTotale: {valore} {unita}"
-                inviata = invia_email(f"Richiesta {tipo_scelta} - {user}", corpo)
-                
-                if inviata: st.success("✅ Richiesta salvata e Email inviata!")
-                else: st.warning("✅ Richiesta salvata, ma errore invio Email.")
-                time.sleep(2); st.rerun()
+                # Email
+                inviata = invia_email(f"Richiesta {tipo} - {user}", f"{user} ha chiesto {val} {unita} dal {da} al {al}")
+                st.success("Richiesta salvata!")
+                time.sleep(1); st.rerun()
