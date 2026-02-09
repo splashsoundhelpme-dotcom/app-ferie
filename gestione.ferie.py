@@ -13,11 +13,16 @@ PASSWORD_ADMIN = "admin2024"
 LIMITE_CONTEMPORANEITA = 3 
 ORE_GIORNATA_FIDUCIARI = 6.67
 
-# --- 1. FUNZIONE INVIO EMAIL ---
+# --- FUNZIONI DI UTILITÀ ---
+def formatta_data_it(data_obj):
+    """Trasforma un oggetto date/datetime o stringa ISO in GG/MM/AAAA"""
+    if isinstance(data_obj, str):
+        data_obj = datetime.strptime(data_obj, '%Y-%m-%d')
+    return data_obj.strftime('%d/%m/%Y')
+
 def invia_email(oggetto, corpo):
     try:
-        if "email" not in st.secrets:
-            return False
+        if "email" not in st.secrets: return False
         mittente = st.secrets["email"]["user"]
         password = st.secrets["email"]["password"]
         destinatario = st.secrets["email"]["admin_email"]
@@ -29,10 +34,9 @@ def invia_email(oggetto, corpo):
             server.login(mittente, password)
             server.sendmail(mittente, destinatario, msg.as_string())
         return True
-    except:
-        return False
+    except: return False
 
-# --- 2. GESTIONE DATABASE ---
+# --- GESTIONE DATABASE ---
 def refresh_database():
     dati_test = [
         ["ROSSINI LORENZO", 6.40, 12.0, "Guardia", "12345"],
@@ -42,18 +46,14 @@ def refresh_database():
         ["TEST FIDUCIARIO 2", 100.0, 40.0, "Fiduciario", "test4"]
     ]
     if not os.path.exists(FILE_DIPENDENTI):
-        df = pd.DataFrame(dati_test, columns=['Nome','Ferie','ROL','Contratto','Password'])
-        df.to_csv(FILE_DIPENDENTI, index=False)
-    
+        pd.DataFrame(dati_test, columns=['Nome','Ferie','ROL','Contratto','Password']).to_csv(FILE_DIPENDENTI, index=False)
     if not os.path.exists(FILE_FERIE):
-        df_vuoto = pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita'])
-        df_vuoto.to_csv(FILE_FERIE, index=False)
-    
+        pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita']).to_csv(FILE_FERIE, index=False)
     return pd.read_csv(FILE_DIPENDENTI), pd.read_csv(FILE_FERIE)
 
 df_dip, df_ferie = refresh_database()
 
-st.set_page_config(page_title="Battistolli HR v26.2", layout="wide")
+st.set_page_config(page_title="Battistolli HR v26.3", layout="wide")
 
 # --- LOGIN ---
 if "user" not in st.session_state:
@@ -61,96 +61,13 @@ if "user" not in st.session_state:
     u_in = st.text_input("NOME").strip().upper()
     p_in = st.text_input("PASSWORD", type="password").strip()
     if st.button("ACCEDI"):
-        # Accetta sia NOME COGNOME che COGNOME NOME
         successo = False
         if u_in == "ADMIN" and p_in == PASSWORD_ADMIN:
-            st.session_state["user"] = "admin"
-            st.rerun()
-        
+            st.session_state["user"] = "admin"; st.rerun()
         for nome_db in df_dip['Nome'].values:
             nome_inv = " ".join(nome_db.split()[::-1])
             if u_in == nome_db or u_in == nome_inv:
-                row = df_dip[df_dip['Nome'] == nome_db].iloc[0]
-                if str(row['Password']) == p_in:
-                    st.session_state["user"] = nome_db
-                    successo = True
-                    break
+                if str(df_dip[df_dip['Nome'] == nome_db].iloc[0]['Password']) == p_in:
+                    st.session_state["user"] = nome_db; successo = True; break
         if successo: st.rerun()
-        else: st.error("Credenziali errate.")
-    st.stop()
-
-user = st.session_state["user"]
-
-# --- AREA ADMIN ---
-if user == "admin":
-    st.header("👨‍💼 Console Amministratore")
-    col_a, col_b = st.columns([3, 1])
-    with col_b:
-        if st.button("🚪 LOGOUT"): 
-            del st.session_state["user"]
-            st.rerun()
-        st.write("---")
-        if st.button("🗑️ RESET RICHIESTE"):
-            pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita']).to_csv(FILE_FERIE, index=False)
-            st.rerun()
-
-    with col_a:
-        st.subheader("📋 Registro Ferie")
-        st.dataframe(df_ferie, use_container_width=True)
-
-# --- AREA UTENTE ---
-else:
-    dati = df_dip[df_dip['Nome'] == user].iloc[0]
-    unita = "Giorni" if dati['Contratto'] == "Guardia" else "Ore"
-    st.header(f"Benvenuto {user}")
-    
-    # Saldi
-    usato_f = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
-    usato_r = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric(f"Ferie ({unita})", round(dati['Ferie'] - usato_f, 2))
-    c2.metric(f"ROL ({unita})", round(dati['ROL'] - usato_r, 2))
-    if c3.button("Logout"): del st.session_state["user"]; st.rerun()
-
-    st.divider()
-    
-    # Calendario Disponibilità
-    st.subheader("📅 Disponibilità Reparto")
-    giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
-    cols = st.columns(len(giorni))
-    for i, g in enumerate(giorni):
-        # Convertiamo le date del CSV per il confronto
-        if not df_ferie.empty:
-            occ = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)])
-        else:
-            occ = 0
-        col_color = "🟢" if occ < LIMITE_CONTEMPORANEITA else "🔴"
-        cols[i].markdown(f"**{g.strftime('%d/%m')}**\n\n{col_color}\n\n{occ}/{LIMITE_CONTEMPORANEITA}")
-
-    st.divider()
-
-    with st.form("richiesta"):
-        tipo = st.selectbox("Tipo", ["Ferie", "ROL"])
-        domani = date.today() + timedelta(days=1)
-        da = st.date_input("Inizio", value=domani, min_value=domani)
-        al = st.date_input("Fine", value=domani, min_value=domani)
-        
-        if st.form_submit_button("Invia"):
-            intervallo = pd.date_range(da, al).date
-            conflitto = False
-            for g in intervallo:
-                if not df_ferie.empty:
-                    cont = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g)])
-                    if cont >= LIMITE_CONTEMPORANEITA:
-                        conflitto = True; break
-            
-            if conflitto:
-                st.error("Posti esauriti in queste date!")
-            else:
-                val = len(intervallo) if dati['Contratto'] == "Guardia" else round(len(intervallo)*6.67, 2)
-                nuova = pd.DataFrame([[user, str(da), str(al), tipo, tipo, val, unita]], columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita'])
-                nuova.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                invia_email(f"Richiesta {tipo} - {user}", f"{user} ha chiesto {val} {unita} dal {da} al {al}")
-                st.success("Richiesta inviata!")
-                time.sleep(1); st.rerun()
+        else: st.error("Credenziali
