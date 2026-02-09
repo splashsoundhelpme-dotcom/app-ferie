@@ -2,21 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 import time
-from datetime import datetime
 
-# --- 1. COMANDO DI PULIZIA FORZATA ---
-# Questo cancella i file "invisibili" che bloccano l'accesso a Lorenzo Rossini
-if os.path.exists('db_dipendenti.csv'):
-    os.remove('db_dipendenti.csv')
-if os.path.exists('db_ferie.csv'):
-    os.remove('db_ferie.csv')
-
-# --- 2. NUOVI DATI (CON LORENZO ROSSINI) ---
-PASSWORD_ADMIN = "admin2024"
-PASSWORD_DEFAULT = "12345"
+# --- CONFIGURAZIONE ---
 FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
 
+# Database iniziale con i nomi corretti
 DIPENDENTI_BASE = [
     ["ROSSINI LORENZO", 0.96, 0.0, "Guardia"],
     ["ABBATICCHIO ANTONIO", 53.13, 11.24, "Fiduciario"],
@@ -26,42 +17,52 @@ DIPENDENTI_BASE = [
     ["FAVIA ANTONIO", 0.0, 0.0, "Guardia"]
 ]
 
-st.set_page_config(page_title="Battistolli HR FIX", layout="wide")
+st.set_page_config(page_title="Battistolli HR - Smart Login", layout="wide")
 
-# --- 3. CREAZIONE DATABASE PULITO ---
-df_dip = pd.DataFrame(DIPENDENTI_BASE, columns=['Nome', 'Ferie', 'ROL', 'Contratto'])
-df_dip['Password'] = PASSWORD_DEFAULT
-df_dip.to_csv(FILE_DIPENDENTI, index=False)
+# --- ENGINE DI INIZIALIZZAZIONE ---
+@st.cache_data
+def load_initial_data():
+    df = pd.DataFrame(DIPENDENTI_BASE, columns=['Nome', 'Ferie', 'ROL', 'Contratto'])
+    df['Password'] = "12345"
+    return df
 
-if not os.path.exists(FILE_FERIE):
-    pd.DataFrame(columns=['Nome','Inizio','Fine','Tipo','Risorsa','Valore','Unita']).to_csv(FILE_FERIE, index=False)
-df_ferie = pd.read_csv(FILE_FERIE)
+df_dip = load_initial_data()
 
-# --- 4. LOGIN ---
+# --- LOGIN INTELLIGENTE ---
 st.title("🏢 Accesso Portale Battistolli")
-u_in = st.text_input("NOME COGNOME").strip().upper()
+u_in = st.text_input("INSERISCI NOME E COGNOME").strip().upper()
 p_in = st.text_input("Password", type="password").strip()
 
 if st.button("ACCEDI"):
-    if u_in == "ADMIN" and p_in == PASSWORD_ADMIN:
+    # Controllo Admin
+    if u_in == "ADMIN" and p_in == "admin2024":
         st.session_state["user"] = "admin"; st.rerun()
-    elif u_in in df_dip['Nome'].values:
-        user_row = df_dip[df_dip['Nome'] == u_in].iloc[0]
-        if str(user_row['Password']) == p_in:
-            st.session_state["user"] = u_in; st.rerun()
-        else: st.error("Password errata.")
+    
+    # Controllo Utente Flessibile (ROSSINI LORENZO o LORENZO ROSSINI)
+    successo = False
+    for nome_db in df_dip['Nome'].values:
+        # Creiamo la versione invertita del nome nel DB (es: da ROSSINI LORENZO a LORENZO ROSSINI)
+        parti = nome_db.split()
+        nome_invertito = " ".join(parti[::-1])
+        
+        if u_in == nome_db or u_in == nome_invertito:
+            user_row = df_dip[df_dip['Nome'] == nome_db].iloc[0]
+            if str(user_row['Password']) == p_in:
+                st.session_state["user"] = nome_db
+                successo = True
+                break
+    
+    if successo:
+        st.success("Accesso eseguito!"); time.sleep(1); st.rerun()
     else:
-        st.error(f"L'utente '{u_in}' non è in lista. Nomi disponibili: {df_dip['Nome'].tolist()}")
+        st.error(f"Credenziali non valide. Assicurati di aver scritto bene il nome.")
 
-# --- 5. AREA UTENTE ---
+# --- AREA PERSONALE ---
 if "user" in st.session_state:
     nome = st.session_state["user"]
     if nome != "admin":
         dati = df_dip[df_dip['Nome'] == nome].iloc[0]
-        unita = "Giorni" if dati['Contratto'] == "Guardia" else "Ore"
-        st.header(f"Ciao {nome}")
-        st.metric(f"Saldo Ferie ({unita})", dati['Ferie'])
+        st.header(f"Benvenuto, {nome}")
+        st.info(f"Contratto: {dati['Contratto']}")
+        st.metric("Saldo Ferie (Giorni)", dati['Ferie'])
         if st.button("LOGOUT"): del st.session_state["user"]; st.rerun()
-    else:
-        st.write("Area Admin")
-        st.dataframe(df_dip)
