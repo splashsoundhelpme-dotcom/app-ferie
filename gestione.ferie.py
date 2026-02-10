@@ -460,3 +460,39 @@ else:
                 nuova_f.to_csv(FILE_FERIE, mode='a', header=False, index=False)
                 invia_email(f"RICHIESTA: {user}", f"{f_tipo} dal {f_dal} al {f_al}")
                 st.success("Richiesta inviata!"); time.sleep(1); st.rerun()
+# ==============================================================================
+# 8. FIRMA ISTITUZIONALE - KEVIN & [TUO NOME]
+# ==============================================================================
+st.markdown("<br><br>", unsafe_allow_html=True)
+st.divider()
+
+# Layout per centrare la firma
+f_col1, f_col2, f_col3 = st.columns([1, 3, 1])
+
+with f_col2:
+    st.markdown(
+        """
+        <div style="
+            background: linear-gradient(135deg, #1c3d5a 0%, #2a5298 100%);
+            padding: 25px;
+            border-left: 8px solid #ffc107;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            color: white;
+        ">
+            <p style="margin: 0; font-size: 0.8em; text-transform: uppercase; letter-spacing: 2px; opacity: 0.8;">
+                Proprietà Riservata - HR Management System
+            </p>
+            <h2 style="margin: 10px 0; font-family: 'Arial Black', sans-serif; color: #ffc107;">
+                KEVIN & [IL TUO NOME]
+            </h2>
+            <div style="height: 2px; background: rgba(255,255,255,0.2); width: 50%; margin: 15px auto;"></div>
+            <p style="margin: 0; font-weight: 300; font-style: italic;">
+                "Efficienza e trasparenza nella gestione dei contratti Guardie e Fiduciari"
+            </p>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    st.markdown("<p style='text-align:center; font-size:0.7em; color:gray;'>© 2026 Battistolli HR Pro v57.2 - All Rights Reserved</p>", unsafe_allow_html=True)
