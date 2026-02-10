@@ -44,7 +44,7 @@ def invia_email(oggetto, corpo):
 def carica_config():
     """Carica i parametri di configurazione dal file CSV."""
     if not os.path.exists(FILE_CONFIG):
-        # Inizializzazione forzata per far scattare l'aggiornamento a Febbraio
+        # Inizializzazione: imposta il mese scorso per forzare l'aggiornamento al primo avvio
         mese_scorso = (datetime.now().month - 1) if datetime.now().month > 1 else 12
         pd.DataFrame([{"limite": 3, "ultimo_mese": mese_scorso}]).to_csv(FILE_CONFIG, index=False)
     
@@ -64,10 +64,20 @@ def salva_config(nuovo_limite, nuovo_mese):
 
 
 # ==============================================================================
-# 3. MOTORE DI CALCOLO MATURAZIONE (Fix v49)
+# 3. MOTORE DI CALCOLO MATURAZIONE (Automatico + Manuale)
 # ==============================================================================
+def applica_maturazione(df_dip):
+    """Funzione core che aggiunge i ratei ai dipendenti."""
+    for idx, row in df_dip.iterrows():
+        if row['Contratto'] == "Guardia":
+            df_dip.at[idx, 'Ferie'] += MAT_FERIE_GUARDIA
+        else:
+            df_dip.at[idx, 'Ferie'] += MAT_FERIE_FIDUCIARIO
+            df_dip.at[idx, 'ROL'] += MAT_ROL_FIDUCIARIO
+    return df_dip
+
 def aggiorna_maturazioni_mensili(df_dip, config):
-    """Verifica se è iniziato un nuovo mese e aggiorna i saldi dei dipendenti."""
+    """Verifica automatica del cambio mese."""
     oggi = datetime.now()
     
     try:
@@ -75,18 +85,13 @@ def aggiorna_maturazioni_mensili(df_dip, config):
     except:
         ultimo_mese_registrato = oggi.month
 
-    # Confronto tra mese attuale e ultimo salvato (Esempio: 2 != 1)
+    # Se siamo in un mese nuovo rispetto all'ultimo salvato
     if oggi.month != ultimo_mese_registrato:
-        st.warning(f"🔄 Rilevato nuovo mese: {oggi.strftime('%B %Y')}. Aggiornamento saldi...")
+        st.warning(f"🔄 Rilevato nuovo mese: {oggi.strftime('%B %Y')}. Aggiornamento saldi in corso...")
         
-        for idx, row in df_dip.iterrows():
-            if row['Contratto'] == "Guardia":
-                df_dip.at[idx, 'Ferie'] += MAT_FERIE_GUARDIA
-            else:
-                df_dip.at[idx, 'Ferie'] += MAT_FERIE_FIDUCIARIO
-                df_dip.at[idx, 'ROL'] += MAT_ROL_FIDUCIARIO
+        df_dip = applica_maturazione(df_dip)
         
-        # Salvataggio dati e aggiornamento stato configurazione
+        # Salvataggio dati e aggiornamento config
         df_dip.to_csv(FILE_DIPENDENTI, index=False)
         salva_config(config['limite'], oggi.month)
         
@@ -166,9 +171,9 @@ def inizializza_database():
 
 
 # ==============================================================================
-# 5. LOGICA DI AUTENTICAZIONE (Fix v52 Rossini)
+# 5. LOGICA DI AUTENTICAZIONE
 # ==============================================================================
-st.set_page_config(page_title="Battistolli HR Pro v55.0", layout="wide")
+st.set_page_config(page_title="Battistolli HR Pro v56.0", layout="wide")
 df_dip, df_ferie = inizializza_database()
 config = carica_config()
 df_dip = aggiorna_maturazioni_mensili(df_dip, config)
@@ -178,22 +183,24 @@ st.markdown("""
     <style>
     .metric-container { background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 8px; }
     .stMetric { color: #1f1f1f; }
+    .stButton>button { width: 100%; border-radius: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
 if "user" not in st.session_state:
     st.title("🏢 Accesso Area Riservata Battistolli")
     
-    with st.container():
+    col_login_1, col_login_2 = st.columns([1,1])
+    with col_login_1:
         u_in = st.text_input("COGNOME NOME").strip().upper()
         p_in = st.text_input("PASSWORD", type="password").strip()
         
-        if st.button("ESEGUI LOGIN"):
+        if st.button("ACCEDI"):
             if u_in == "ADMIN" and p_in == PASSWORD_ADMIN:
                 st.session_state["user"] = "admin"
                 st.rerun()
             
-            # Logic Set per gestire l'inversione Nome/Cognome (Lorenzo Rossini)
+            # Logic Set per gestire l'inversione Nome/Cognome
             input_set = set(u_in.split())
             
             for idx, row in df_dip.iterrows():
@@ -204,7 +211,7 @@ if "user" not in st.session_state:
                     st.session_state["primo_accesso"] = row['PrimoAccesso']
                     st.rerun()
                     
-            st.error("Accesso negato. Verificare i dati inseriti.")
+            st.error("Credenziali non valide. Riprovare.")
     st.stop()
 
 
@@ -212,24 +219,24 @@ user = st.session_state["user"]
 
 
 # ==============================================================================
-# 6. AREA AMMINISTRATORE (Pannello di Controllo)
+# 6. AREA AMMINISTRATORE (Con Reset Password e Force Accrual)
 # ==============================================================================
 if user == "admin":
-    st.header("👨‍💼 Gestione Amministrativa")
+    st.header("👨‍💼 Pannello Amministratore")
     
-    t1, t2, t3 = st.tabs(["Monitoraggio Assenze", "Anagrafica Personale", "Impostazioni Sistema"])
+    t1, t2, t3 = st.tabs(["Registro Richieste", "Gestione Personale", "Impostazioni Sistema"])
     
     with t1:
-        st.subheader("Registro O.D.S. Completo")
+        st.subheader("Storico O.D.S. Completo")
         st.dataframe(df_ferie, use_container_width=True)
         
-        if st.button("Disconnetti Admin"):
+        if st.button("Logout Admin"):
             del st.session_state["user"]
             st.rerun()
             
     with t2:
-        st.subheader("Modifica Dati e Saldi (Fix v48)")
-        st.info("Le modifiche apportate qui sono salvate in tempo reale nel database.")
+        st.subheader("1. Modifica Saldi ed Esclusioni")
+        st.caption("Modifica i valori direttamente nelle celle e clicca Salva.")
         
         df_edit = st.data_editor(
             df_dip[['Nome', 'Contratto', 'Escluso', 'Ferie', 'ROL']],
@@ -240,55 +247,84 @@ if user == "admin":
             },
             disabled=["Nome"], 
             use_container_width=True, 
-            key="admin_v55_editor"
+            key="admin_editor_main"
         )
         
-        if st.button("💾 SALVA E SINCRONIZZA"):
+        if st.button("💾 SALVA MODIFICHE TABELLA"):
             df_dip.update(df_edit)
             df_dip.to_csv(FILE_DIPENDENTI, index=False)
-            st.success("Database sincronizzato!")
+            st.success("Database aggiornato con successo!")
             time.sleep(1)
             st.rerun()
 
-    with t3:
-        st.subheader("Parametri Operativi")
-        soglia = st.slider("Numero massimo di assenze contemporanee", 1, 15, int(config['limite']))
+        st.divider()
+        st.subheader("2. Reset Password Utente")
+        st.caption("Seleziona un utente per ripristinare la password a '12345' e forzare il cambio al prossimo accesso.")
         
-        if st.button("Aggiorna Configurazione"):
+        col_res_1, col_res_2 = st.columns([3, 1])
+        with col_res_1:
+            utente_reset = st.selectbox("Seleziona Dipendente", df_dip['Nome'].unique())
+        with col_res_2:
+            st.write("") # Spacer
+            st.write("") # Spacer
+            if st.button("🔄 RESET PASSWORD"):
+                df_dip.loc[df_dip['Nome'] == utente_reset, "Password"] = "12345"
+                df_dip.loc[df_dip['Nome'] == utente_reset, "PrimoAccesso"] = True
+                df_dip.to_csv(FILE_DIPENDENTI, index=False)
+                st.success(f"Password di {utente_reset} ripristinata a 12345!")
+
+    with t3:
+        st.subheader("Configurazione Limiti")
+        soglia = st.slider("Max assenze contemporanee", 1, 15, int(config['limite']))
+        
+        if st.button("Salva Nuova Soglia"):
             salva_config(soglia, config['ultimo_mese'])
-            st.success("Parametri salvati!")
+            st.success("Parametro aggiornato!")
+            st.rerun()
+            
+        st.divider()
+        st.subheader("Strumenti Avanzati")
+        st.warning("⚠️ Usare solo se i saldi non si sono aggiornati automaticamente questo mese.")
+        
+        if st.button("🔄 FORZA MATURAZIONE MESE CORRENTE (Manuale)"):
+            df_dip = applica_maturazione(df_dip)
+            df_dip.to_csv(FILE_DIPENDENTI, index=False)
+            # Aggiorna anche il config per evitare doppi scatti automatici
+            salva_config(config['limite'], datetime.now().month)
+            st.success("Maturazione applicata manualmente a tutti i dipendenti!")
+            time.sleep(1.5)
             st.rerun()
 
 
 # ==============================================================================
-# 7. AREA UTENTE (Richieste e Saldi Personali)
+# 7. AREA UTENTE
 # ==============================================================================
 else:
-    # Gestione Cambio Password Obbligatorio
+    # Cambio Password Obbligatorio (Login 12345)
     if st.session_state.get("primo_accesso", False):
-        st.warning("🔒 Sicurezza: È obbligatorio cambiare la password al primo accesso.")
+        st.warning("🔒 Sicurezza: È necessario impostare una password personale.")
         
         np1 = st.text_input("Nuova Password", type="password")
         np2 = st.text_input("Conferma Password", type="password")
         
-        if st.button("IMPOSTA PASSWORD"):
+        if st.button("SALVA PASSWORD"):
             if np1 == np2 and len(np1) >= 5:
                 df_dip.loc[df_dip['Nome'] == user, ['Password', 'PrimoAccesso']] = [np1, False]
                 df_dip.to_csv(FILE_DIPENDENTI, index=False)
                 st.session_state["primo_accesso"] = False
-                st.success("Password aggiornata correttamente!")
+                st.success("Password impostata! Accesso in corso...")
                 time.sleep(1)
                 st.rerun()
             else:
-                st.error("Errore: le password devono coincidere e avere almeno 5 caratteri.")
+                st.error("Le password non coincidono o sono troppo corte (min 5 caratteri).")
         st.stop()
 
-    # Calcolo Saldi Attuali
+    # Dashboard
     info_u = df_dip[df_dip['Nome'] == user].iloc[0]
     uso_f  = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
     uso_r  = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
 
-    st.header(f"Benvenuto, {user}")
+    st.header(f"Area Personale: {user}")
     
     col1, col2, col3 = st.columns(3)
     col1.metric("Saldo Ferie (GG)", round(info_u['Ferie'] - uso_f, 2))
@@ -300,12 +336,12 @@ else:
         del st.session_state["user"]
         st.rerun()
 
-    # Sezione Annullamento (Fix v47)
+    # Le mie richieste (Annullamento)
     st.subheader("Le tue richieste attive")
     mie_rich = df_ferie[df_ferie['Nome'] == user]
     
     if mie_rich.empty:
-        st.info("Non ci sono richieste in attesa.")
+        st.info("Nessuna richiesta in elenco.")
     else:
         for idx, r in mie_rich.iterrows():
             c_a, c_b = st.columns([5, 1])
@@ -313,14 +349,15 @@ else:
             if c_b.button("❌", key=f"del_{idx}"):
                 df_ferie = df_ferie.drop(idx)
                 df_ferie.to_csv(FILE_FERIE, index=False)
-                invia_email(f"CANCELLAZIONE: {user}", f"Annullato {r['Tipo']} ({r['Inizio']})")
+                invia_email(f"ANNULLO: {user}", f"Annullato {r['Tipo']} del {r['Inizio']}")
                 st.rerun()
 
     st.divider()
     
-    # Visualizzazione Disponibilità Reparto
+    # Pallini Disponibilità
     def check_limite(d):
         m = df_ferie.merge(df_dip[['Nome', 'Escluso']], on='Nome')
+        # Escludi 104 e Congedo Parentale dal conteggio limiti
         count = m[
             (pd.to_datetime(m['Inizio']).dt.date <= d) & 
             (pd.to_datetime(m['Fine']).dt.date >= d) & 
@@ -329,7 +366,7 @@ else:
         ]
         return len(count)
 
-    st.subheader(f"Disponibilità Personale (Limite: {config['limite']})")
+    st.subheader(f"Stato Operativo Reparto (Limite: {config['limite']})")
     
     giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
     cols = st.columns(len(giorni))
@@ -341,31 +378,32 @@ else:
             st.write("🟢" if occupati < config['limite'] else "🔴")
             st.caption(f"{occupati}/{config['limite']}")
 
-    # Form Richiesta O.D.S.
-    with st.form("nuova_richiesta_ods"):
-        st.subheader("Compila Nuova Richiesta")
+    # Modulo Richiesta
+    with st.form("form_richiesta_v56"):
+        st.subheader("Nuova Richiesta O.D.S.")
         opz = ["Ferie", "Permesso 104", "Donazione Sangue", "Congedo Parentale"]
         if info_u['Contratto'] == "Fiduciario":
             opz.insert(1, "ROL")
             
-        tipo = st.selectbox("Causale", opz)
-        dal  = st.date_input("Inizio", min_value=date.today() + timedelta(days=1))
-        al   = st.date_input("Fine", min_value=date.today() + timedelta(days=1))
+        tipo = st.selectbox("Tipologia Assenza", opz)
+        dal  = st.date_input("Data Inizio", min_value=date.today() + timedelta(days=1))
+        al   = st.date_input("Data Fine", min_value=date.today() + timedelta(days=1))
         
-        if st.form_submit_button("INVIA O.D.S."):
+        if st.form_submit_button("INVIA RICHIESTA"):
             range_gg = pd.date_range(dal, al).date
             bloccato = False
             
+            # Controllo Limiti (Se non escluso e non causale protetta)
             if not info_u['Escluso'] and tipo not in ["Permesso 104", "Congedo Parentale"]:
                 if any(check_limite(d) >= config['limite'] for d in range_gg):
                     bloccato = True
             
             if bloccato:
-                st.error("Spiacente, una o più date selezionate hanno raggiunto il limite massimo.")
+                st.error(f"Impossibile procedere: raggiunto il limite di {config['limite']} assenze per le date scelte.")
             else:
                 nuovo_r = pd.DataFrame([[user, str(dal), str(al), tipo, tipo, len(range_gg), "GG"]], columns=df_ferie.columns)
                 nuovo_r.to_csv(FILE_FERIE, mode='a', header=False, index=False)
                 invia_email(f"RICHIESTA: {user}", f"{tipo} dal {dal} al {al}")
-                st.success("Richiesta inviata con successo!")
+                st.success("Richiesta salvata con successo!")
                 time.sleep(1)
                 st.rerun()
