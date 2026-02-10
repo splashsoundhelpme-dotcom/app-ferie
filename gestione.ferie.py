@@ -443,7 +443,40 @@ else:
         f_tipo = st.selectbox("Causale Richiesta", opzioni)
         f_dal  = st.date_input("Dalla data", min_value=date.today() + timedelta(days=1))
         f_al   = st.date_input("Alla data", min_value=date.today() + timedelta(days=1))
-        
+        # ==============================================================================
+# HEADER ISTITUZIONALE BTV (SOBRIO)
+# ==============================================================================
+def render_header():
+    st.markdown(
+        """
+        <div style="display: flex; align-items: center; justify-content: space-between; 
+                    padding: 10px; border-bottom: 2px solid #ffc107; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center;">
+                <div style="color: #ffc107; font-size: 30px; margin-right: 15px;">★</div>
+                <div>
+                    <h1 style="margin: 0; font-size: 1.5em; color: #1c3d5a; line-height: 1;">
+                        BATTISTOLLI <span style="font-weight: 300; font-size: 0.8em;">HR Master</span>
+                    </h1>
+                    <p style="margin: 0; font-size: 0.7em; color: #6c757d; letter-spacing: 1px;">
+                        Gestione Contratti Guardie / Fiduciari
+                    </p>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-family: 'serif'; font-size: 1.2em; color: #1c3d5a; font-weight: bold; letter-spacing: 2px;">
+                    K & L
+                </div>
+                <div style="font-size: 0.6em; color: #ffc107; text-transform: uppercase; font-weight: bold;">
+                    Official System
+                </div>
+            </div>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+
+# Chiamata alla funzione subito dopo il caricamento dati
+render_header()
         if st.form_submit_button("INVIA O.D.S."):
             giorni_richiesti = pd.date_range(f_dal, f_al).date
             is_bloccato = False
@@ -460,39 +493,3 @@ else:
                 nuova_f.to_csv(FILE_FERIE, mode='a', header=False, index=False)
                 invia_email(f"RICHIESTA: {user}", f"{f_tipo} dal {f_dal} al {f_al}")
                 st.success("Richiesta inviata!"); time.sleep(1); st.rerun()
-# ==============================================================================
-# 8. FIRMA ISTITUZIONALE - KEVIN & [TUO NOME]
-# ==============================================================================
-st.markdown("<br><br>", unsafe_allow_html=True)
-st.divider()
-
-# Layout per centrare la firma
-f_col1, f_col2, f_col3 = st.columns([1, 3, 1])
-
-with f_col2:
-    st.markdown(
-        """
-        <div style="
-            background: linear-gradient(135deg, #1c3d5a 0%, #2a5298 100%);
-            padding: 25px;
-            border-left: 8px solid #ffc107;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            color: white;
-        ">
-            <p style="margin: 0; font-size: 0.8em; text-transform: uppercase; letter-spacing: 2px; opacity: 0.8;">
-                Proprietà Riservata - HR Management System
-            </p>
-            <h2 style="margin: 10px 0; font-family: 'Arial Black', sans-serif; color: #ffc107;">
-                KEVIN & [IL TUO NOME]
-            </h2>
-            <div style="height: 2px; background: rgba(255,255,255,0.2); width: 50%; margin: 15px auto;"></div>
-            <p style="margin: 0; font-weight: 300; font-style: italic;">
-                "Efficienza e trasparenza nella gestione dei contratti Guardie e Fiduciari"
-            </p>
-        </div>
-        """, 
-        unsafe_allow_html=True
-    )
-    st.markdown("<p style='text-align:center; font-size:0.7em; color:gray;'>© 2026 Battistolli HR Pro v57.2 - All Rights Reserved</p>", unsafe_allow_html=True)
