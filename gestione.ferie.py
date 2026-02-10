@@ -6,11 +6,16 @@ import smtplib
 from email.mime.text import MIMEText
 import time
 
-# --- 1. CONFIGURAZIONE FILE ---
+# --- 1. CONFIGURAZIONE E MATURAZIONI ESATTE ---
 FILE_DIPENDENTI = 'db_dipendenti.csv'
 FILE_FERIE = 'db_ferie.csv'
 FILE_CONFIG = 'db_config.csv'
 PASSWORD_ADMIN = "admin2024"
+
+# Valori definitivi aggiornati
+MAT_FERIE_GUARDIA = 1.917
+MAT_FERIE_FIDUCIARIO = 2.16  # (14.417 ore / 6.67h)
+MAT_ROL_FIDUCIARIO = 0.60    # (4 ore / 6.67h)
 
 # --- 2. FUNZIONI DI SISTEMA ---
 def invia_email(oggetto, corpo):
@@ -34,7 +39,7 @@ def carica_config():
 def salva_config(nuovo_limite):
     pd.DataFrame([{"limite": nuovo_limite}]).to_csv(FILE_CONFIG, index=False)
 
-# --- 3. DATABASE INTEGRALE (TUTTI I 42 RECORD) ---
+# --- 3. DATABASE INTEGRALE (TUTTE LE RIGHE ANAGRAFICA) ---
 def inizializza_database():
     elenco = [
         ["BOZZI RAFFAELLA", 258.08, 106.6, "Fiduciario", "12345", True],
@@ -87,13 +92,13 @@ def inizializza_database():
     return pd.read_csv(FILE_DIPENDENTI), pd.read_csv(FILE_FERIE)
 
 # --- 4. AVVIO APP ---
-st.set_page_config(page_title="Battistolli HR v36.1", layout="wide")
+st.set_page_config(page_title="Battistolli HR v39.0", layout="wide")
 df_dip, df_ferie = inizializza_database()
 LIMITE_ATTUALE = carica_config()
 
-# --- 5. LOGIN FLESSIBILE ---
+# --- 5. LOGIN ---
 if "user" not in st.session_state:
-    st.title("🏢 Gestione Personale Battistolli")
+    st.title("🏢 Accesso Battistolli")
     u_in = st.text_input("COGNOME NOME").strip().upper()
     p_in = st.text_input("PASSWORD", type="password").strip()
     if st.button("ACCEDI"):
@@ -105,101 +110,102 @@ if "user" not in st.session_state:
                 st.session_state["user"] = row['Nome']
                 st.session_state["primo_accesso"] = row['PrimoAccesso']
                 st.rerun()
-        st.error("Dati non corretti.")
+        st.error("Dati errati.")
     st.stop()
 
 user = st.session_state["user"]
 
 # --- 6. AREA ADMIN ---
 if user == "admin":
-    st.header("👨‍💼 Pannello Admin O.D.S.")
-    t1, t2, t3 = st.tabs(["Registro Richieste", "Anagrafica Operatori", "Parametri Limite"])
+    st.header("👨‍💼 Pannello Amministratore")
+    t1, t2, t3 = st.tabs(["Registro Richieste", "Gestione Dipendenti", "Limite Contemporaneità"])
 
     with t1:
         st.dataframe(df_ferie, use_container_width=True)
-        st.download_button("📥 Scarica Report CSV", df_ferie.to_csv(index=False), "report_ferie.csv")
-        if st.button("Esci"): del st.session_state["user"]; st.rerun()
+        st.download_button("📥 Scarica Registro", df_ferie.to_csv(index=False), "registro.csv")
+        if st.button("Logout Admin"): del st.session_state["user"]; st.rerun()
 
     with t2:
-        st.subheader("Aggiungi nuovo dipendente")
-        with st.form("nuovo_utente"):
+        st.subheader("Registra Nuovo Operatore")
+        with st.form("new_user"):
             n_nome = st.text_input("Cognome Nome").upper()
-            n_tipo = st.selectbox("Tipo Contratto", ["Fiduciario", "Guardia"])
-            n_f = st.number_input("Saldo Ferie Iniziale", value=0.0)
-            n_r = st.number_input("Saldo ROL Iniziale", value=0.0)
-            if st.form_submit_button("SALVA NUOVO UTENTE"):
-                if n_nome and n_nome not in df_dip['Nome'].values:
-                    nuovo_row = pd.DataFrame([[n_nome, n_f, (n_r if n_tipo=="Fiduciario" else 0), n_tipo, "12345", True]], columns=df_dip.columns)
-                    df_dip = pd.concat([df_dip, nuovo_row], ignore_index=True)
+            n_tipo = st.selectbox("Contratto", ["Fiduciario", "Guardia"])
+            n_f = st.number_input("Ferie (GG)", value=0.0)
+            n_r = st.number_input("ROL (GG)", value=0.0)
+            if st.form_submit_button("AGGIUNGI"):
+                if n_nome:
+                    nuovo = pd.DataFrame([[n_nome, n_f, (n_r if n_tipo=="Fiduciario" else 0), n_tipo, "12345", True]], columns=df_dip.columns)
+                    df_dip = pd.concat([df_dip, nuovo], ignore_index=True)
                     df_dip.to_csv(FILE_DIPENDENTI, index=False)
-                    st.success("Utente aggiunto!"); time.sleep(1); st.rerun()
+                    st.success("Utente aggiunto correttamente!")
+                    time.sleep(1); st.rerun()
         st.divider()
         st.dataframe(df_dip[['Nome', 'Contratto', 'Ferie', 'ROL']], use_container_width=True)
 
     with t3:
-        st.subheader("Configurazione Soglia Assenze")
-        st.write(f"Limite attuale impostato a: **{LIMITE_ATTUALE}**")
-        nuovo_lim = st.slider("Seleziona nuovo limite contemporaneità", 1, 10, LIMITE_ATTUALE)
-        if st.button("Aggiorna Limite"):
+        st.subheader("Flessibilità Ferie")
+        st.write(f"Limite attuale: **{LIMITE_ATTUALE}**")
+        nuovo_lim = st.slider("Cambia soglia massima assenze", 1, 15, LIMITE_ATTUALE)
+        if st.button("Salva Configurazione"):
             salva_config(nuovo_lim)
-            st.success("Configurazione salvata!"); time.sleep(1); st.rerun()
+            st.success("Limite salvato!")
+            time.sleep(1); st.rerun()
 
 # --- 7. AREA UTENTE ---
 else:
     info = df_dip[df_dip['Nome'] == user].iloc[0]
-    # Maturazioni (valori da definire domani)
-    mat_f = info['Ferie'] + 1.83 
-    mat_r = info['ROL'] + (0.90 if info['Contratto'] == "Fiduciario" else 0)
+    
+    # MATURAZIONE DINAMICA
+    if info['Contratto'] == "Guardia":
+        mat_f = info['Ferie'] + MAT_FERIE_GUARDIA
+        mat_r = 0
+    else:
+        mat_f = info['Ferie'] + MAT_FERIE_FIDUCIARIO
+        mat_r = info['ROL'] + MAT_ROL_FIDUCIARIO
+        
     usato_f = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'Ferie')]['Valore'].sum()
     usato_r = df_ferie[(df_ferie['Nome'] == user) & (df_ferie['Risorsa'] == 'ROL')]['Valore'].sum()
     
     st.header(f"Profilo: {user}")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Saldo Ferie (GG)", round(mat_f - usato_f, 2))
-    c2.metric("Saldo ROL (GG)", round(mat_r - usato_r, 2) if info['Contratto']=="Fiduciario" else "N/A")
-    if c3.button("Logout"): del st.session_state["user"]; st.rerun()
+    c1.metric("Ferie GG", round(mat_f - usato_f, 2))
+    if info['Contratto'] == "Fiduciario":
+        c2.metric("ROL GG", round(mat_r - usato_r, 2))
+    if c3.button("Esci"): del st.session_state["user"]; st.rerun()
 
     st.divider()
-    st.subheader("Le mie prenotazioni")
-    mie_r = df_ferie[df_ferie['Nome'] == user]
-    if mie_r.empty: st.info("Nessuna richiesta presente.")
-    else:
-        for i, row in mie_r.iterrows():
-            col_x, col_y = st.columns([4, 1])
-            col_x.write(f"**{row['Tipo']}** | {row['Inizio']} -> {row['Fine']}")
-            if col_y.button("Annulla", key=f"del_{i}"):
-                df_ferie = df_ferie.drop(i)
-                df_ferie.to_csv(FILE_FERIE, index=False)
-                invia_email(f"Cancellazione: {user}", f"L'utente {user} ha annullato la richiesta di {row['Tipo']}")
-                st.rerun()
+    st.subheader("Annullamento")
+    mie = df_ferie[df_ferie['Nome'] == user]
+    for i, row in mie.iterrows():
+        col_a, col_b = st.columns([4, 1])
+        col_a.write(f"**{row['Tipo']}** dal {row['Inizio']} al {row['Fine']}")
+        if col_b.button("Annulla", key=f"del_{i}"):
+            df_ferie = df_ferie.drop(i)
+            df_ferie.to_csv(FILE_FERIE, index=False)
+            invia_email(f"Cancellazione: {user}", f"{user} ha annullato la richiesta di {row['Tipo']}")
+            st.rerun()
 
     st.divider()
-    st.subheader(f"Calendario Disponibilità (Soglia: {LIMITE_ATTUALE})")
-    giorni = pd.date_range(date.today() + timedelta(days=1), periods=10).date
-    cols = st.columns(len(giorni))
+    st.subheader(f"Calendario Reparto (Max {LIMITE_ATTUALE})")
+    giorni = pd.date_range(date.today() + timedelta(days=1), periods=15).date
+    cols = st.columns(5)
     for i, g in enumerate(giorni):
         occ = len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= g) & (pd.to_datetime(df_ferie['Fine']).dt.date >= g) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale"]))])
-        with cols[i]:
+        with cols[i % 5]:
             st.write(f"**{g.strftime('%d/%m')}**")
             st.write("🟢" if occ < LIMITE_ATTUALE else "🔴")
             st.caption(f"{occ}/{LIMITE_ATTUALE}")
 
-    with st.form("invio"):
+    with st.form("richiesta_f"):
+        st.subheader("Invia Richiesta")
         opz = ["Ferie", "Permesso 104", "Donazione Sangue", "Congedo Parentale"]
         if info['Contratto'] == "Fiduciario": opz.insert(1, "ROL")
         tipo = st.selectbox("Causale", opz)
-        d_dal = st.date_input("Inizio", min_value=date.today()+timedelta(days=1))
-        d_al = st.date_input("Fine", min_value=date.today()+timedelta(days=1))
-        if st.form_submit_button("Invia Richiesta"):
-            range_gg = pd.date_range(d_dal, d_al).date
-            conflitto = False
+        d1 = st.date_input("Dal", min_value=date.today()+timedelta(days=1))
+        d2 = st.date_input("Al", min_value=date.today()+timedelta(days=1))
+        if st.form_submit_button("INVIA"):
+            gg = pd.date_range(d1, d2).date
+            blocco = False
             if tipo not in ["Permesso 104", "Congedo Parentale"]:
-                for d in range_gg:
-                    if len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale"]))]) >= LIMITE_ATTUALE:
-                        conflitto = True; break
-            if conflitto: st.error(f"Posti esauriti (max {LIMITE_ATTUALE}).")
-            else:
-                nuovo_f = pd.DataFrame([[user, str(d_dal), str(d_al), tipo, tipo, len(range_gg), "GG"]], columns=df_ferie.columns)
-                nuovo_f.to_csv(FILE_FERIE, mode='a', header=False, index=False)
-                invia_email(f"Richiesta {tipo}: {user}", f"{user}: {tipo} dal {d_dal} al {d_al}")
-                st.success("Richiesta inviata correttamente!"); time.sleep(1); st.rerun()
+                for d in gg:
+                    if len(df_ferie[(pd.to_datetime(df_ferie['Inizio']).dt.date <= d) & (pd.to_datetime(df_ferie['Fine']).dt.date >= d) & (~df_ferie['Tipo'].isin(["Permesso 104", "Congedo Parentale
