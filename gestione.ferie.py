@@ -79,7 +79,40 @@ def salva_config(nuovo_limite, nuovo_mese):
 
 
 # ==============================================================================
-# 3. LOGICA DI CALCOLO MATURAZIONE (GUARDIE vs FIDUCIARI)
+# ==============================================================================
+# HEADER ISTITUZIONALE BTV (K & L EDITION)
+# ==============================================================================
+st.markdown(
+    """
+    <div style="display: flex; align-items: center; justify-content: space-between; 
+                padding: 15px; border-bottom: 3px solid #ffc107; margin-bottom: 30px;
+                background-color: #ffffff; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+        
+        <div style="display: flex; align-items: center;">
+            <div style="color: #ffc107; font-size: 35px; margin-right: 15px; filter: drop-shadow(0 0 2px rgba(0,0,0,0.2));">★</div>
+            
+            <div>
+                <h1 style="margin: 0; font-size: 1.6em; color: #1c3d5a; font-family: 'Arial', sans-serif;">
+                    BATTISTOLLI <span style="font-weight: 300; font-size: 0.8em;">HR Master</span>
+                </h1>
+                <p style="margin: 0; font-size: 0.75em; color: #6c757d; font-weight: bold; text-transform: uppercase;">
+                    Gestione Personale Guardie & Fiduciari
+                </p>
+            </div>
+        </div>
+
+        <div style="text-align: right; border-left: 1px solid #dee2e6; padding-left: 20px;">
+            <div style="font-family: 'Georgia', serif; font-size: 1.4em; color: #1c3d5a; font-weight: bold; letter-spacing: 3px;">
+                K & L
+            </div>
+            <div style="font-size: 0.6em; color: #ffc107; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">
+                Official System
+            </div>
+        </div>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)# 3. LOGICA DI CALCOLO MATURAZIONE (GUARDIE vs FIDUCIARI)
 # ==============================================================================
 def applica_maturazione(df_dip):
     """
@@ -443,40 +476,7 @@ else:
         f_tipo = st.selectbox("Causale Richiesta", opzioni)
         f_dal  = st.date_input("Dalla data", min_value=date.today() + timedelta(days=1))
         f_al   = st.date_input("Alla data", min_value=date.today() + timedelta(days=1))
-        # ==============================================================================
-# HEADER ISTITUZIONALE BTV (SOBRIO)
-# ==============================================================================
-def render_header():
-    st.markdown(
-        """
-        <div style="display: flex; align-items: center; justify-content: space-between; 
-                    padding: 10px; border-bottom: 2px solid #ffc107; margin-bottom: 25px;">
-            <div style="display: flex; align-items: center;">
-                <div style="color: #ffc107; font-size: 30px; margin-right: 15px;">★</div>
-                <div>
-                    <h1 style="margin: 0; font-size: 1.5em; color: #1c3d5a; line-height: 1;">
-                        BATTISTOLLI <span style="font-weight: 300; font-size: 0.8em;">HR Master</span>
-                    </h1>
-                    <p style="margin: 0; font-size: 0.7em; color: #6c757d; letter-spacing: 1px;">
-                        Gestione Contratti Guardie / Fiduciari
-                    </p>
-                </div>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-family: 'serif'; font-size: 1.2em; color: #1c3d5a; font-weight: bold; letter-spacing: 2px;">
-                    K & L
-                </div>
-                <div style="font-size: 0.6em; color: #ffc107; text-transform: uppercase; font-weight: bold;">
-                    Official System
-                </div>
-            </div>
-        </div>
-        """, 
-        unsafe_allow_html=True
-    )
-
-# Chiamata alla funzione subito dopo il caricamento dati
-render_header()
+        
         if st.form_submit_button("INVIA O.D.S."):
             giorni_richiesti = pd.date_range(f_dal, f_al).date
             is_bloccato = False
