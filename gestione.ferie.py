@@ -460,3 +460,22 @@ else:
                 nuova_f.to_csv(FILE_FERIE, mode='a', header=False, index=False)
                 invia_email(f"RICHIESTA: {user}", f"{f_tipo} dal {f_dal} al {f_al}")
                 st.success("Richiesta inviata!"); time.sleep(1); st.rerun()
+# ==============================================================================
+# FOOTER DISCRETO K & L (DA INSERIRE A FINE FILE)
+# ==============================================================================
+st.markdown("---") # Riga di separazione sottile
+st.markdown(
+    """
+    <div style="display: flex; justify-content: space-between; align-items: center; opacity: 0.7; padding: 10px;">
+        <div style="font-size: 0.8em; color: #6c757d;">
+            Battistolli HR Master v57.1 • 2026
+        </div>
+        <div style="text-align: right;">
+            <span style="color: #ffc107; font-size: 1.2em;">★</span>
+            <span style="font-family: 'Georgia', serif; font-weight: bold; color: #1c3d5a; margin-left: 5px;">K & L</span>
+            <span style="font-size: 0.7em; color: #ffc107; text-transform: uppercase; display: block; letter-spacing: 1px;">Official System</span>
+        </div>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
